@@ -40,6 +40,10 @@ class Database(context: Context) : SQLiteOpenHelper(context, "journey.db", null,
  }
  fun ensure(day: String = day()) {
   val db = writableDatabase
+  if(day==day() && setting("expiry_checked")!=day) {
+   db.beginTransaction()
+   try { val expired=mutableListOf<Triple<String,String,Long>>(); db.rawQuery("SELECT day,kind,SUM(amount) FROM ledger WHERE day<? GROUP BY day,kind HAVING SUM(amount)>0",arrayOf(day)).use { c->while(c.moveToNext()) expired.add(Triple(c.getString(0),c.getString(1),c.getLong(2))) };expired.forEach { (date,kind,amount)->ledger(db,date,"expiry",kind,-amount);audit(date,"未使用奖励过期：$kind / $amount") };setSetting("expiry_checked",day);db.setTransactionSuccessful() } finally {db.endTransaction()}
+  }
   val confirmed = db.rawQuery("SELECT confirmed FROM contracts WHERE day=?", arrayOf(day)).use { if(it.moveToFirst()) it.getInt(0) != 0 else null }
   if (confirmed == true) return
   db.beginTransaction()
