@@ -7,6 +7,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.PixelFormat
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
+import android.content.res.ColorStateList
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -61,12 +65,25 @@ class FocusService : AccessibilityService() {
   if (blocked && overlay == null) show() else if (!blocked) hide()
  }
  private fun show() {
-  val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setPadding(48,48,48,48); setBackgroundColor(0xff090a0b.toInt()) }
-  panel.addView(TextView(this).apply { text = "先完成今天的目标"; textSize = 26f; setTextColor(0xffeeeeee.toInt()); gravity = Gravity.CENTER })
-  panel.addView(TextView(this).apply { text = (if(db.eligible()) "视频时间已用完，完成选做任务可领取额外时间" else "完成并确认所有必做任务后，即可解锁娱乐")+"\n剩余视频时间：${db.balance("video") / 60000} 分钟"; textSize = 17f; setTextColor(0xffaeb7bd.toInt()); gravity = Gravity.CENTER; setPadding(0,32,0,32) })
-  panel.addView(Button(this).apply { text = "返回自律 App"; setOnClickListener { current = null; hide(); startActivity(Intent(this@FocusService, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)) } })
-  panel.addView(Button(this).apply { text = "紧急解锁（记录至今天）"; setOnClickListener { db.emergency(); hide() } })
-  panel.addView(Button(this).apply { text = "返回桌面"; setOnClickListener { current = null; hide(); performGlobalAction(GLOBAL_ACTION_HOME) } })
+  val density=resources.displayMetrics.density
+  fun dp(value:Int)=(value*density).toInt()
+  val panel = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER;setPadding(dp(30),dp(42),dp(30),dp(42));setBackgroundColor(0xff0e1110.toInt()) }
+  fun label(value:String,size:Float,color:Int,bold:Boolean=false)=TextView(this).apply { text=value;textSize=size;setTextColor(color);gravity=Gravity.CENTER;typeface=if(bold)Typeface.create("sans-serif-medium",Typeface.NORMAL) else Typeface.create("sans-serif",Typeface.NORMAL);setLineSpacing(dp(5).toFloat(),1f) }
+  fun button(value:String,primary:Boolean,onClick:()->Unit) {
+   val fill=GradientDrawable().apply{cornerRadius=dp(17).toFloat();setColor(if(primary)0xffa8bbaa.toInt() else 0xff202522.toInt())}
+   val ripple=RippleDrawable(ColorStateList.valueOf(0x30ffffff),fill,null)
+   val view=label(value,15f,if(primary)0xff172019.toInt() else 0xffe8ece7.toInt(),true).apply{background=ripple;isClickable=true;isFocusable=true;setPadding(dp(18),dp(17),dp(18),dp(17));setOnClickListener{onClick()}}
+   panel.addView(view,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(12)})
+  }
+  panel.addView(label("向前    ·    娱乐时间",12f,0xff9aa39c.toInt(),true),LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(28)})
+  val exhausted=db.eligible()
+  panel.addView(label(if(exhausted)"今日额度已用完" else "先完成今天的任务",31f,0xfff0f2ed.toInt(),true),LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(12)})
+  panel.addView(label(if(exhausted)"完成选做任务后，可领取额外视频时间。" else "完成并确认全部必做任务后，即可解锁娱乐时间。",16f,0xff9aa39c.toInt()),LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(30)})
+  panel.addView(label("${db.balance("video")/60000}",52f,0xfff0f2ed.toInt()),LinearLayout.LayoutParams(-1,-2))
+  panel.addView(label("剩余共享视频分钟",13f,0xff6f7972.toInt()),LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(3);bottomMargin=dp(26)})
+  button("返回自律 App",true){current=null;hide();startActivity(Intent(this@FocusService,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))}
+  button("紧急解锁",false){db.emergency();hide()}
+  button("返回桌面",false){current=null;hide();performGlobalAction(GLOBAL_ACTION_HOME)}
   val params = WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN, PixelFormat.TRANSLUCENT)
   overlay = panel; wm.addView(panel, params)
  }

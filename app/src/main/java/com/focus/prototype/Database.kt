@@ -52,6 +52,7 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
  private fun Cursor.i(name: String) = getInt(getColumnIndexOrThrow(name))
  private fun Cursor.l(name: String) = getLong(getColumnIndexOrThrow(name))
  private fun Cursor.b(name: String) = i(name) != 0
+ private fun Cursor.task() = Task(s("id"),s("day"),s("title"),b("required"),i("minutes"),s("mode"),s("checklist"),i("reward_minutes"),i("reward_games"),l("elapsed"),l("running_since"),l("boot_time"),s("evidence"),b("done"),b("claimed"))
  fun setting(key: String, default: String = ""): String = readableDatabase.rawQuery("SELECT value FROM settings WHERE key=?", arrayOf(key)).use { if (it.moveToFirst()) it.getString(0) else default }
  fun setSetting(key: String, value: String) { writableDatabase.insertWithOnConflict("settings", null, cv("key" to key,"value" to value), SQLiteDatabase.CONFLICT_REPLACE) }
  fun importPlan(target: String, drafts: List<PlanDraft>) {
@@ -97,7 +98,8 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
   } finally { db.endTransaction() }
  }
  fun contract(day: String = day()): Contract { ensure(day); return readableDatabase.rawQuery("SELECT * FROM contracts WHERE day=?", arrayOf(day)).use { c -> c.moveToFirst(); Contract(day,c.b("confirmed"),c.b("rest"),c.i("base_minutes"),c.i("base_games"),c.b("base_claimed"),c.b("emergency")) } }
- fun tasks(day: String = day()): List<Task> { ensure(day); val list = mutableListOf<Task>(); readableDatabase.rawQuery("SELECT * FROM tasks WHERE day=? ORDER BY required DESC, rowid", arrayOf(day)).use { c -> while(c.moveToNext()) list.add(Task(c.s("id"),c.s("day"),c.s("title"),c.b("required"),c.i("minutes"),c.s("mode"),c.s("checklist"),c.i("reward_minutes"),c.i("reward_games"),c.l("elapsed"),c.l("running_since"),c.l("boot_time"),c.s("evidence"),c.b("done"),c.b("claimed"))) }; return list }
+ fun tasks(day: String = day()): List<Task> { ensure(day); val list = mutableListOf<Task>(); readableDatabase.rawQuery("SELECT * FROM tasks WHERE day=? ORDER BY required DESC, rowid", arrayOf(day)).use { c -> while(c.moveToNext()) list.add(c.task()) }; return list }
+ fun task(id:String):Task? = readableDatabase.rawQuery("SELECT * FROM tasks WHERE id=?",arrayOf(id)).use { if(it.moveToFirst()) it.task() else null }
  fun runningTasks(): List<Task> { val days=mutableListOf<String>(); readableDatabase.rawQuery("SELECT DISTINCT day FROM tasks WHERE running_since>0",null).use { while(it.moveToNext()) days.add(it.getString(0)) }; return days.flatMap { tasks(it).filter { t -> t.runningSince>0 } } }
  fun addTask(day: String, title: String, required: Boolean, minutes: Int, mode: String, checklist: String, rewardMinutes: Int, rewardGames: Int, recurrence: String) {
   ensure(day); val contract = contract(day); require(title.isNotBlank() && (!contract.confirmed || !required))

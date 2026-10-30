@@ -1,5 +1,6 @@
 package com.focus.prototype
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
@@ -18,20 +19,20 @@ import java.time.YearMonth
 
 @Composable fun GrowthDetails(db:Database) {
  val today=LocalDate.parse(db.day());val history=db.history().toMap();var selected by remember {mutableStateOf(today.toString())};var month by remember {mutableStateOf(YearMonth.from(today))}
- Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween){TextButton(onClick={month=month.minusMonths(1)}){Text("‹")};Text("${month.year} 年 ${month.monthValue} 月",style=MaterialTheme.typography.titleMedium);TextButton(onClick={month=month.plusMonths(1)}){Text("›")}}
- Row(Modifier.fillMaxWidth()){listOf("一","二","三","四","五","六","日").forEach{Box(Modifier.weight(1f),contentAlignment=Alignment.Center){Text(it,color=Color.Gray,fontSize=12.sp)}}}
+ Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween){TextButton(onClick={month=month.minusMonths(1)}){Text("‹",color=AppColors.Muted)};Text("${month.year} 年 ${month.monthValue} 月",style=MaterialTheme.typography.titleLarge);TextButton(onClick={month=month.plusMonths(1)}){Text("›",color=AppColors.Muted)}}
+ Row(Modifier.fillMaxWidth()){listOf("一","二","三","四","五","六","日").forEach{Box(Modifier.weight(1f),contentAlignment=Alignment.Center){Text(it,color=AppColors.Quiet,style=MaterialTheme.typography.labelSmall)}}}
  val offset=month.atDay(1).dayOfWeek.value-1;val rows=(offset+month.lengthOfMonth()+6)/7
  val counts=(1..month.lengthOfMonth()).map{history[month.atDay(it).toString()]}.groupingBy{it}.eachCount();val complete=counts["完成"]?:0;val rested=counts["休息"]?:0;val missed=counts["未完成"]?:0;val recorded=complete+rested+missed
- Row(Modifier.fillMaxWidth().padding(vertical=14.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.Center){Box(Modifier.size(124.dp),contentAlignment=Alignment.Center){Canvas(Modifier.fillMaxSize().padding(5.dp)){val total=month.lengthOfMonth().toFloat();var start=-90f;for((count,color) in listOf(complete to Color.White,rested to Color(0xff777d83),missed to Color(0xff9a403c))){if(count>0){val sweep=360f*count/total;drawArc(color,start,sweep,false,style=Stroke(8.dp.toPx()));start+=sweep}};if(recorded==0)drawArc(Color(0xff303438),-90f,360f,false,style=Stroke(8.dp.toPx()))};Column(horizontalAlignment=Alignment.CenterHorizontally){Text("$complete",fontSize=30.sp,fontWeight=FontWeight.Bold);Text("完成日",fontSize=11.sp,color=Color.Gray)}};Spacer(Modifier.width(24.dp));Column(verticalArrangement=Arrangement.spacedBy(7.dp)){Text("${complete+rested+missed} / ${month.lengthOfMonth()} 天有记录",fontSize=14.sp);Text("完成 $complete  ·  休息 $rested",fontSize=12.sp,color=Color.LightGray);Text("未完成 $missed",fontSize=12.sp,color=Color.LightGray)}}
+ Row(Modifier.fillMaxWidth().padding(vertical=14.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.Center){Box(Modifier.size(124.dp),contentAlignment=Alignment.Center){Canvas(Modifier.fillMaxSize().padding(5.dp)){val total=month.lengthOfMonth().toFloat();var start=-90f;for((count,color) in listOf(complete to AppColors.Accent,rested to AppColors.Muted,missed to Color(0xff67443e))){if(count>0){val sweep=360f*count/total;drawArc(color,start,sweep,false,style=Stroke(5.dp.toPx()));start+=sweep}};if(recorded==0)drawArc(AppColors.Raised,-90f,360f,false,style=Stroke(5.dp.toPx()))};Column(horizontalAlignment=Alignment.CenterHorizontally){Text("$complete",fontSize=30.sp,fontWeight=FontWeight.Light,color=AppColors.Text);Text("完成日",style=MaterialTheme.typography.labelSmall,color=AppColors.Muted)}};Spacer(Modifier.width(24.dp));Column(verticalArrangement=Arrangement.spacedBy(7.dp)){Text("${complete+rested+missed} / ${month.lengthOfMonth()} 天有记录",style=MaterialTheme.typography.titleSmall);Text("完成 $complete  ·  休息 $rested",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted);Text("未完成 $missed",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)}}
  repeat(rows) {week->Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(5.dp)){
   repeat(7){index->val number=week*7+index-offset+1
    if(number !in 1..month.lengthOfMonth())Spacer(Modifier.weight(1f).aspectRatio(1f))
-   else {val date=month.atDay(number).toString();val state=history[date];val color=when(state){"完成"->Color(0xffeceeee);"休息"->Color(0xff585e64);"未完成"->Color(0xff592a29);else->Color(0xff191c1f)}
-    Box(Modifier.weight(1f).aspectRatio(1f).background(color,RoundedCornerShape(8.dp)).clickable{selected=date},contentAlignment=Alignment.Center){Column(horizontalAlignment=Alignment.CenterHorizontally){Text(number.toString(),color=if(state=="完成")Color.Black else Color.LightGray);if(selected==date)Text("•",fontSize=8.sp,color=if(state=="完成")Color.Black else Color.White)}}
+   else {val date=month.atDay(number).toString();val state=history[date];val color=when(state){"完成"->AppColors.Accent;"休息"->AppColors.Raised;"未完成"->Color(0xff302320);else->AppColors.Surface}
+    Box(Modifier.weight(1f).aspectRatio(1f).background(color,RoundedCornerShape(12.dp)).border(if(selected==date)1.dp else 0.dp,if(selected==date)AppColors.Text else Color.Transparent,RoundedCornerShape(12.dp)).clickable{selected=date},contentAlignment=Alignment.Center){Text(number.toString(),color=if(state=="完成")AppColors.AccentInk else AppColors.Muted,style=MaterialTheme.typography.bodySmall)}
    }
   }
  }}
- Text("白色 完成 · 灰色 休息 · 暗红 未完成",color=Color.Gray,fontSize=11.sp)
+ Text("浅青灰 完成 · 深灰 休息 · 暗色 未完成",color=AppColors.Quiet,style=MaterialTheme.typography.bodySmall)
  Text("$selected · ${history[selected]?:"未记录"}",style=MaterialTheme.typography.titleSmall)
  if(history.containsKey(selected)) {db.tasks(selected).forEach{Text("${if(it.done) "已完成" else "未完成"} · ${it.title}",fontSize=13.sp,color=Color.LightGray)};val review=db.readReview(selected);if(review.any{it.isNotBlank()})Text("今日总结：${review.filter{it.isNotBlank()}.joinToString("\n")}",fontSize=13.sp)}
  for(days in listOf(7,30)) {
