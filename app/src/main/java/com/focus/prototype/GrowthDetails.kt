@@ -39,6 +39,19 @@ import java.time.YearMonth
   val from=today.minusDays((days-1).toLong()).toString()
   db.readableDatabase.rawQuery("SELECT COUNT(*),COALESCE(SUM(done),0),COALESCE(SUM(elapsed),0) FROM tasks WHERE day>=? AND day<=?",arrayOf(from,today.toString())).use{c->c.moveToFirst();val total=c.getInt(0);val done=c.getInt(1);Text("近 $days 天",style=MaterialTheme.typography.titleMedium);Text("${if(total==0)0 else done*100/total}% 完成率 · $done / $total 项 · 专注 ${c.getLong(2)/60000} 分钟",fontSize=13.sp,color=Color.LightGray)}
  }
+ val lifetime=db.readableDatabase.rawQuery("SELECT COALESCE(SUM(done),0),COALESCE(SUM(elapsed),0) FROM tasks",null).use{c->c.moveToFirst();c.getInt(0) to c.getLong(1)}
+ val milestones=listOf(
+  Triple("迈出第一步","完成任务 ${lifetime.first.coerceAtMost(1)} / 1 项",lifetime.first>=1),
+  Triple("十次坚持","完成任务 ${lifetime.first.coerceAtMost(10)} / 10 项",lifetime.first>=10),
+  Triple("一周节奏","最长连续 ${db.bestStreak().coerceAtMost(7)} / 7 天",db.bestStreak()>=7),
+  Triple("专注十小时","累计专注 ${(lifetime.second/60000).coerceAtMost(600)} / 600 分钟",lifetime.second>=600*60000L),
+ )
+ SectionHeading("成长里程碑")
+ Text("根据你的任务与专注记录持续点亮。",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
+ milestones.forEachIndexed{index,(title,detail,earned)->
+  Row(Modifier.fillMaxWidth().padding(vertical=12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween){Column(verticalArrangement=Arrangement.spacedBy(4.dp)){Text(title,style=MaterialTheme.typography.titleMedium,color=AppColors.Text);Text(detail,style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)};StatusPill(if(earned)"已达成" else "进行中",active=earned)}
+  if(index<milestones.lastIndex)Hairline()
+ }
  Text("例外与计划变更",style=MaterialTheme.typography.titleMedium)
  db.readableDatabase.rawQuery("SELECT day,detail,created FROM audit ORDER BY created DESC LIMIT 30",null).use{c->while(c.moveToNext())Text("${c.getString(0)} · ${c.getString(1)}",fontSize=12.sp,color=Color.LightGray)}
 }
