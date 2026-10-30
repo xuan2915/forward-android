@@ -30,6 +30,10 @@ class Database(context: Context) : SQLiteOpenHelper(context, "journey.db", null,
  private fun Cursor.b(name: String) = i(name) != 0
  fun setting(key: String, default: String = ""): String = readableDatabase.rawQuery("SELECT value FROM settings WHERE key=?", arrayOf(key)).use { if (it.moveToFirst()) it.getString(0) else default }
  fun setSetting(key: String, value: String) { writableDatabase.insertWithOnConflict("settings", null, cv("key" to key,"value" to value), SQLiteDatabase.CONFLICT_REPLACE) }
+ fun importPlan(target: String, drafts: List<PlanDraft>) {
+  val db=writableDatabase; db.beginTransaction()
+  try { require(!contract(target).confirmed); val existing=tasks(target).map { it.title }.toSet(); drafts.filter { it.title !in existing }.forEach { addTask(target,it.title,it.required,0,"行动型","按计划完成并自检",20,1,"once") }; setSetting("import_draft",""); audit(target,"从文本导入 ${drafts.size} 项待确认任务"); db.setTransactionSuccessful() } finally { db.endTransaction() }
+ }
  fun day(): String {
   val now = LocalDateTime.now(); val boundary = setting("boundary", "4").toIntOrNull()?.coerceIn(0, 23) ?: 4
   return (if (now.hour < boundary) now.toLocalDate().minusDays(1) else now.toLocalDate()).toString()
@@ -79,6 +83,12 @@ class Database(context: Context) : SQLiteOpenHelper(context, "journey.db", null,
  fun evidence(task: Task, path: String) { writableDatabase.update("tasks",cv("evidence" to path),"id=?",arrayOf(task.id)) }
  fun complete(task: Task) { pause(task); val fresh=tasks(task.date).first { it.id == task.id }; require(fresh.elapsed >= fresh.minutes * 60000L && (fresh.mode == "行动型" || fresh.evidence.isNotBlank())); writableDatabase.update("tasks",cv("done" to true),"id=?",arrayOf(task.id)) }
  fun removeDraft(task: Task) { require(!contract(task.date).confirmed && !task.done); writableDatabase.delete("tasks","id=?",arrayOf(task.id)) }
+ fun editDraft(task: Task, title:String, minutes:Int, checklist:String) { require(!contract(task.date).confirmed && !task.done && title.isNotBlank()); writableDatabase.update("tasks",cv("title" to title.trim(),"minutes" to minutes,"checklist" to checklist),"id=?",arrayOf(task.id)) }
+ fun rewardHistory(): List<String> {
+  val out=mutableListOf<String>()
+  readableDatabase.rawQuery("SELECT day,kind,SUM(CASE WHEN amount>0 THEN amount ELSE 0 END),SUM(CASE WHEN amount<0 THEN -amount ELSE 0 END) FROM ledger GROUP BY day,kind ORDER BY day DESC LIMIT 30",null).use { c -> while(c.moveToNext()) { val video=c.getString(1)=="video"; val divisor=if(video) 60000.0 else 1.0; out.add("${c.getString(0)} · ${if(video) "视频分钟" else "游戏局数"}  获得 ${"%.1f".format(c.getLong(2)/divisor)} / 使用与冲正 ${"%.1f".format(c.getLong(3)/divisor)}") } }
+  return out
+ }
  fun revoke(task: Task) {
   val db = writableDatabase; db.beginTransaction()
   try {
