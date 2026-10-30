@@ -1,15 +1,27 @@
-# 自律成长 Android 原型
+# 向前 · Android 自律
 
-本地应用：每日契约、必做和选做任务、计时、自检、相机照片、视频及游戏奖励账本、复盘和成长信息。抖音与 B站的已选应用共享视频额度；游戏局数由用户手动记录。无 AI、账号、服务器或 VPN。
+本地优先的 Android 自律 App。先确认必做和选做任务，专注后按预设要求自检，完成必做任务后领取当日娱乐额度；选做奖励在领取时二选一。抖音和 B 站共享视频分钟池，游戏局数保留为手动账本。
 
-安装后首先添加任务并确认每日契约，开启系统无障碍服务，并在奖励页选择受限应用。必做任务完成并自检后，在奖励页领取基础额度；选做任务完成后可选取其预设奖励。选择计划休息日时不能有必做任务。可在系统设置中随时撤销授权或卸载。
+首页提供今日任务与保护状态。奖励页管理应用拦截、基础与选做额度、临时 B 站学习窗口和奖励记录。成长页显示 XP、等级、当前及最佳连续记录、月历、周/月完成率和专注时长。复盘支持手写、粘贴文本或从 OPPO 笔记分享纯文本；识别出的明日任务先由用户确认。设置可创建未来任务、预设休息日、调整次日生效的自律日界线，以及导出/恢复含附件的本地备份。
 
-目前为开发版本，尚非完整 PRD V1：任务编辑和冻结后的计划变更、可配置日界线、完整周期类型、全尺寸照片和文件附件、数据备份恢复、奖励与使用历史展示、完整成长日历/统计和成就等尚未完成。系统重启后的计时与 ColorOS 的实际拦截、锁屏及后台行为尚未经过设备验收，不能保证可靠拦截或准确计费。
+支持一次性、每日及指定星期任务。任务模板与日期实例分开保存；补生成缺失日期时保留未完成历史，编辑未来周期不会改写完成记录。确认当天计划后必做条件冻结；计划变更会要求理由并留痕，删减必做不会自动解锁。紧急解锁单独记录，不授予经验或额度。
 
-## 构建
+照片、PDF 和文本附件保存在应用私有目录并按完整文件查看。所有任务、计时、奖励流水、日历、复盘和受限应用设置保存在本机。备份可经 Android 文件选择器导出和恢复。
 
-使用 JDK 17、Android SDK 35、Build Tools 35.0.0，运行 `gradlew.bat :app:assembleDebug`。Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。
+## 构建和验证
 
-## 开源参考
+使用 JDK 17、Android SDK 35、Build Tools 35.0.0：
 
-前台窗口事件识别参考并改写自 [SelfLock](https://github.com/EtashTyagi/SelfLock)，其 MIT 许可证和版权声明见 `LICENSES/SelfLock.txt`。QuestPhone 仅参考任务完成后解锁的产品思路，未复制 GPL 代码。
+```powershell
+./gradlew.bat :app:assembleDebug :app:testDebugUnitTest :app:assembleDebugAndroidTest
+```
+
+Debug APK：`app/build/outputs/apk/debug/app-debug.apk`。业务单元测试使用 Robolectric Android 9 SQLite，并可通过 Android Instrumentation 在已连接设备或模拟器运行。`tools/build-fixtures.py` 仅生成空白计费测试宿主；只有在专用 Android 模拟器上运行 `tools/service-check.py` 才会把它们安装到抖音/B站包名，不能将其当作真实应用验收。
+
+## 已知界限
+
+自检与照片不会被 AI 或其他方式判断真实性。游戏不识别对局，也不自动扣局或拦截局内行为。OPPO ColorOS 17 的无障碍保活、系统调度和真实抖音/B站切换仍需 Find X8 实机验收；系统可随时撤销授权、停止服务或卸载应用。
+
+## 开源代码
+
+前台应用识别和拦截服务参考并改写自 SelfLock，MIT 版权与许可证保留在 `LICENSES/SelfLock.txt`。QuestPhone 只参考交互思路，没有复制 GPL-3.0 源码。

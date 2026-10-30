@@ -1,0 +1,70 @@
+package com.focus.prototype
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.SharedPreferences
+import java.io.File
+import java.time.LocalDateTime
+fun runBusinessChecks(targetContext:Context):List<String> {
+val checks=mutableListOf<String>();var now=LocalDateTime.parse("2026-10-30T12:00:00")
+  val context=object:ContextWrapper(targetContext){override fun getFilesDir()=File(super.getFilesDir(),"business-checks").apply{mkdirs()};override fun getApplicationContext():Context=this;override fun getSharedPreferences(name:String,mode:Int):SharedPreferences=super.getSharedPreferences("check_$name",mode)}
+  val name="business-checks.db";context.deleteDatabase(name)
+  var db=Database(context,name){now}
+  fun test(name:String,block:()->Unit){block();checks.add(name)}
+  try {
+   test("recurrence, mandatory gate, single base grant") {
+    db.addTask(db.day(),"required",true,0,"行动型","done",20,1,"days:1,3,5")
+    db.addTask(db.day(),"optional",false,0,"行动型","done",20,1,"once")
+    db.confirm(db.day(),false,30,1);check(!db.eligible());db.complete(db.tasks().first{it.required});check(db.balance("video")==1800000L);repeat(3){db.grantBase()};check(db.balance("video")==1800000L)
+   }
+   test("optional choice idempotency and consumption") {
+    val optional=db.tasks().first{!it.required};db.complete(optional);repeat(3){db.claim(optional,"video")};db.claim(optional,"game");check(db.balance("video")==3000000L);check(db.balance("game")==1L);db.consume("video",60000);check(db.balance("video")==2940000L)
+   }
+   test("reopen preserves completion and balance") {
+    db.close();db=Database(context,name){now};check(db.tasks().count{it.done}==2);check(db.balance("video")==2940000L);db.grantBase();check(db.balance("video")==2940000L)
+   }
+   test("midnight and 04 boundary expiration") {
+    now=LocalDateTime.parse("2026-10-31T03:59:59");check(db.day()=="2026-10-30");now=now.plusSeconds(1);check(db.day()=="2026-10-31");db.ensure();check(db.balance("video","2026-10-30")==0L);check(db.tasks().isEmpty());check(db.tasks("2026-10-30").all{it.done})
+   }
+   test("weekday generates once, template edit preserves history") {
+    now=LocalDateTime.parse("2026-11-02T12:00:00");check(db.tasks().single().title=="required");db.ensure();check(db.tasks().size==1);val task=db.tasks().single();db.revise(task,"updated",true,0,"行动型","new",10,1,"daily","",applyFuture=true);check(db.tasks("2026-10-30").first{it.required}.title=="required");check(db.tasks("2026-11-03").single().title=="updated")
+   }
+   test("frozen edit requires reason, deletion does not regenerate") {
+    db.confirm(db.day(),false,30,0);val task=db.tasks().single();check(runCatching{db.revise(task,"x",true,0,"行动型","",0,0,"daily","")}.isFailure);db.revise(task,"x",true,0,"行动型","",0,0,"daily","incorrect input",delete=true);check(db.tasks().isEmpty());check(!db.eligible());check(db.setting("changed_${db.day()}")=="true")
+   }
+   test("planned rest preserves streak semantics and no mandatory") {
+    db.planRest("2026-11-04");check(db.contract("2026-11-04").rest);check(db.tasks("2026-11-04").none{it.required})
+   }
+   test("boundary change is deferred") {
+    val before=db.day();db.scheduleBoundary(6);check(db.day()==before);now=LocalDateTime.parse("2026-11-03T05:59:59");check(db.day()=="2026-11-02");now=now.plusSeconds(1);check(db.day()=="2026-11-03")
+   }
+   test("proof, review, backup restore, repeat restore") {
+    val date=db.day();db.addTask(date,"proof",false,0,"成果型","photo",5,1,"once");val task=db.tasks().first{it.title=="proof"};val file=File(context.filesDir,"evidence/proof.txt");file.parentFile!!.mkdirs();file.writeText("evidence bytes");db.evidence(task,file.absolutePath);db.review(date,"problem","praise","note");Store(context).selected=setOf("tv.danmaku.bili");val saved=Backup.export(context,db);db.setSetting("extra","x");repeat(2){Backup.restore(context,db,saved)};check(db.setting("extra")=="");check(db.readReview(date)==listOf("problem","praise","note"));val proof=db.tasks().first{it.title=="proof"};check(File(proof.evidence).readText()=="evidence bytes");check(Store(context).selected==setOf("tv.danmaku.bili"))
+   }
+   test("invalid restore leaves records intact") { val before=db.xp();check(runCatching{Backup.restore(context,db,"{}")}.isFailure);check(db.xp()==before) }
+   test("multiple full attachments survive restore and removal") {
+    val task=db.tasks().first{it.title=="proof"};val second=File(context.filesDir,"evidence/second.pdf");second.writeText("%PDF-test-bytes");db.evidence(task,second.absolutePath);check(db.attachments(task).size==2);val saved=Backup.export(context,db);repeat(3){Backup.restore(context,db,saved)};check(db.attachments(task).map{File(it.second).readText()}.toSet()==setOf("evidence bytes","%PDF-test-bytes"));db.removeAttachment(task,db.attachments(task).last().first);check(db.attachments(task).size==1)
+   }
+   test("focus pause resume checkpoint and stale events") {
+    val task=db.tasks().first{it.title=="proof"};db.start(task);android.os.SystemClock.sleep(150);db.start(task);db.checkpoint();val elapsed=db.elapsed(db.tasks().first{it.id==task.id});check(elapsed>=100);db.pause(task);db.pause(task);check(db.tasks().first{it.id==task.id}.elapsed>=elapsed);db.close();db=Database(context,name){now};check(db.tasks().first{it.id==task.id}.elapsed>=elapsed)
+   }
+   test("past rewards cannot be resurrected") {db.grantBase("2026-10-30");check(db.balance("video","2026-10-30")==0L)}
+   test("rest bridges streak, emergency earns nothing, missed day resets") {
+    val other="streak-check.db";context.deleteDatabase(other);var clock=LocalDateTime.parse("2026-10-01T12:00:00");Database(context,other){clock}.use{d->
+     d.addTask(d.day(),"one",true,0,"行动型","",0,0,"daily");d.confirm(d.day(),false,0,0);d.complete(d.tasks().single());d.planRest("2026-10-02");clock=clock.plusDays(1);d.settleToday();check(d.streak()==1);clock=clock.plusDays(1);d.confirm(d.day(),false,0,0);d.complete(d.tasks().single());check(d.streak()==2);check(d.bestStreak()==2);clock=clock.plusDays(1);d.ensure();d.emergency();check(d.xp()==200);check(d.balance("video")==0L);clock=clock.plusDays(1);check(d.streak()==0)
+    }
+   }
+   test("restore SQL failure rolls back records") {val before=db.xp();val root=org.json.JSONObject(Backup.export(context,db));root.getJSONObject("data").getJSONArray("tasks").getJSONObject(0).put("invalid_column","x");check(runCatching{Backup.restore(context,db,root.toString())}.isFailure);check(db.xp()==before)}
+   test("legacy backup migrates templates and attachments") {
+    val root=org.json.JSONObject(Backup.export(context,db));root.put("version",1);val data=root.getJSONObject("data");data.remove("templates");data.remove("attachments");val rows=data.getJSONArray("tasks");for(i in 0 until rows.length())rows.getJSONObject(i).remove("template_id");Backup.restore(context,db,root.toString());check(db.attachments(db.tasks().first{it.title=="proof"}).size==1);check(db.tasks("2026-11-06").any{it.title=="required"})
+   }
+   test("missed dates generate recurring records without completion") {
+    val other="gap-check.db";context.deleteDatabase(other);var clock=LocalDateTime.parse("2026-10-01T12:00:00");val d=Database(context,other){clock}
+    try{d.addTask(d.day(),"repeat",true,0,"行动型","",0,0,"daily");clock=clock.plusDays(4);d.ensure();check(d.tasks("2026-10-02").single().done==false);check(d.tasks("2026-10-04").size==1);check(d.history().count{it.second=="未完成"}==4);repeat(3){d.ensure()};check(d.tasks().size==1)}finally{d.close()}
+   }
+   test("schema v1 upgrade preserves task history") {
+    val other="migration-check.db";context.deleteDatabase(other);val old=Database(context,other){now};old.addTask(old.day(),"legacy",true,0,"行动型","",0,0,"daily");old.confirm(old.day(),false,5,0);old.complete(old.tasks().single());val sql=old.writableDatabase;val create=sql.rawQuery("SELECT sql FROM sqlite_master WHERE name='tasks'",null).use{it.moveToFirst();it.getString(0)}.replace(Regex(",\\s*template_id TEXT NOT NULL DEFAULT ''"),"");sql.execSQL("ALTER TABLE tasks RENAME TO previous_tasks");sql.execSQL(create);sql.execSQL("INSERT INTO tasks SELECT "+sql.rawQuery("PRAGMA table_info(tasks)",null).use{val cols=mutableListOf<String>();while(it.moveToNext())cols.add(it.getString(1));cols.joinToString(",")}+" FROM previous_tasks");sql.execSQL("DROP TABLE previous_tasks");sql.execSQL("DROP TABLE templates");sql.execSQL("DROP TABLE attachments");sql.version=1;old.close();val upgraded=Database(context,other){now};try{check(upgraded.tasks().single().done);check(upgraded.balance("video")==300000L);check(upgraded.tasks(java.time.LocalDate.parse(upgraded.day()).plusDays(1).toString()).single().title=="legacy")}finally{upgraded.close()}
+   }
+   test("frozen mandatory deletion cannot unlock after others complete") {val other="change-gate.db";context.deleteDatabase(other);val d=Database(context,other){now};try{val today=d.day();d.addTask(today,"one",true,0,"行动型","",0,0,"once");d.addTask(today,"two",true,0,"行动型","",0,0,"once");d.confirm(today,false,30,0);val deleted=d.tasks().first();d.revise(deleted,deleted.title,deleted.required,0,deleted.mode,deleted.checklist,0,0,"once","mistake",delete=true);d.complete(d.tasks().first());check(!d.eligible());check(d.balance("video")==0L)}finally{d.close()}}
+return checks
+ } finally {db.close()}
+}

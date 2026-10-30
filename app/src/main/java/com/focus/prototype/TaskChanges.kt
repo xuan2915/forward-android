@@ -6,11 +6,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 @Composable fun TaskChanges(task:Task,db:Database,onChanged:()->Unit) {
- var open by remember { mutableStateOf(false) }; var title by remember { mutableStateOf(task.title) }; var minutes by remember { mutableStateOf(task.minutes.toString()) }; var required by remember { mutableStateOf(task.required) }; var mode by remember { mutableStateOf(task.mode) }; var checklist by remember { mutableStateOf(task.checklist) }; var video by remember { mutableStateOf(task.rewardMinutes.toString()) }; var games by remember { mutableStateOf(task.rewardGames.toString()) }; var days by remember { mutableStateOf("1,2,3,4,5") }; var rule by remember { mutableStateOf(db.recurrence(task)) }; var reason by remember { mutableStateOf("") }; var deleting by remember { mutableStateOf(false) }
+ var open by remember { mutableStateOf(false) }; var title by remember { mutableStateOf(task.title) }; var minutes by remember { mutableStateOf(task.minutes.toString()) }; var required by remember { mutableStateOf(task.required) }; var mode by remember { mutableStateOf(task.mode) }; var checklist by remember { mutableStateOf(task.checklist) }; var video by remember { mutableStateOf(task.rewardMinutes.toString()) }; var games by remember { mutableStateOf(task.rewardGames.toString()) }; var days by remember { mutableStateOf(db.recurrence(task).removePrefix("days:")) }; var rule by remember { mutableStateOf(db.recurrence(task)) }; var reason by remember { mutableStateOf("") }; var deleting by remember { mutableStateOf(false) }
  val frozen=db.contract(task.date).confirmed
+ var applyFuture by remember { mutableStateOf(false) }
+ var confirming by remember {mutableStateOf(false)}
+ fun save(){db.revise(task,title,required,minutes.toIntOrNull()?:0,mode,checklist,video.toIntOrNull()?:0,games.toIntOrNull()?:0,rule,reason,deleting,applyFuture);open=false;confirming=false;onChanged()}
  TextButton(onClick={open=!open}) {Text(if(frozen) "变更本次计划" else "编辑任务全部要求")}
  if(open) Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
-  Text("修改仅影响本次任务；周期设置用于之后的日期。已完成记录保留。")
+  Text("默认仅修改本次任务。勾选后同步更新未确认的未来任务，已完成记录保留。")
+  Row { Checkbox(applyFuture,onCheckedChange={applyFuture=it});Text("同时修改未来周期任务") }
   OutlinedTextField(title,onValueChange={title=it},label={Text("名称")})
   Row { Checkbox(required,onCheckedChange={required=it}); Text("必做任务") }
   OutlinedTextField(minutes,onValueChange={minutes=it.filter(Char::isDigit).take(4)},label={Text("目标分钟")})
@@ -22,8 +26,10 @@ import androidx.compose.ui.unit.dp
   Text("重复规则：$rule")
   if(frozen) OutlinedTextField(reason,onValueChange={reason=it},label={Text("变更原因（会保留原要求与时间）")})
   Row { Checkbox(deleting,onCheckedChange={deleting=it});Text("删除本次任务") }
-  Button(enabled=title.isNotBlank() && (!frozen || reason.isNotBlank()),onClick={db.revise(task,title,required,minutes.toIntOrNull()?:0,mode,checklist,video.toIntOrNull()?:0,games.toIntOrNull()?:0,rule,reason,deleting);open=false;onChanged()}) {Text(if(frozen) "确认变更并记录" else "保存修改")}
+  if(frozen && task.required && (deleting || !required))Text("删减已确认的必做不会自动解锁娱乐。需要使用时，可选择有记录的紧急解锁。")
+  Button(enabled=title.isNotBlank() && (!frozen || reason.isNotBlank()),onClick={if(frozen)confirming=true else save()}) {Text(if(frozen) "确认变更并记录" else "保存修改")}
  }
+ if(confirming)AlertDialog(onDismissRequest={confirming=false},title={Text("确认修改今天的计划？")},text={Text("原要求、新要求和原因都会保留。${if(applyFuture) "未确认的未来周期任务也将更新。" else "只修改本次任务。"}")},confirmButton={TextButton(onClick={save()}){Text("确认修改")}},dismissButton={TextButton(onClick={confirming=false}){Text("返回检查")}})
 }
 
 @Composable fun DaySettings(db:Database,onChanged:()->Unit) {
