@@ -24,4 +24,4 @@ Debug APK：`app/build/outputs/apk/debug/app-debug.apk`。业务单元测试使�
 
 ## 开源代码
 
-前台应用识别和拦截服务参考并改写自 SelfLock，MIT 版权与许可证保留在 `LICENSES/SelfLock.txt`。QuestPhone 只参考交互思路，没有复制 GPL-3.0 源码。
+前台应用识别和拦截服务参考并改写自 SelfLock，MIT 版权与许可证保留在 `LICENSES/SelfLock.txt`。成长日历集成 Kizitonwose Calendar（MIT），成长趋势图集成 Vico（Apache-2.0），许可文本及 UI 参考范围见 `LICENSES/ThirdParty.md`。Compose Samples（Jetsnack）与 Grit 只用于研究设计组织，未复制源码；QuestPhone 只参考交互思路，没有复制 GPL-3.0 源码。

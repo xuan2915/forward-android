@@ -52,17 +52,19 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 @Composable fun GrowthHero(db:Database) {
  val xp=db.xp();val level=xp/500+1;val progress by animateFloatAsState((xp%500)/500f,label="level")
  val rank=listOf("启程","萌芽","探索","积累","进阶","坚韧","精进","卓越")[(xp/500).coerceAtMost(7)]
-  Column(Modifier.fillMaxWidth().padding(vertical=12.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)) {
-  Box(Modifier.size(208.dp),contentAlignment=Alignment.Center) {
-   Canvas(Modifier.fillMaxSize().padding(9.dp)){val stroke=Stroke(5.dp.toPx(),cap=StrokeCap.Round);drawArc(AppColors.Raised,-90f,360f,false,style=stroke);drawArc(AppColors.Accent,-90f,360f*progress,false,style=stroke)}
-   Column(horizontalAlignment=Alignment.CenterHorizontally){Text("$xp",fontSize=48.sp,fontWeight=FontWeight.Light);Text("成长经验 XP",fontSize=12.sp,color=AppColors.Muted)}
+ Row(Modifier.fillMaxWidth().padding(vertical=4.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(18.dp)) {
+  Box(Modifier.size(108.dp),contentAlignment=Alignment.Center) {
+   Canvas(Modifier.fillMaxSize().padding(7.dp)){val stroke=Stroke(4.dp.toPx(),cap=StrokeCap.Round);drawArc(AppColors.Raised,-90f,360f,false,style=stroke);drawArc(AppColors.Accent,-90f,360f*progress,false,style=stroke)}
+   Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(1.dp)){Text("$xp",fontSize=29.sp,fontWeight=FontWeight.Light);Text("XP",fontSize=10.sp,color=AppColors.Muted)}
   }
-  Text("等级 $level · $rank",fontSize=22.sp,fontWeight=FontWeight.Bold)
-  Text("距下一级还需 ${500-xp%500} XP",color=AppColors.Muted,fontSize=13.sp)
-  HorizontalDivider(Modifier.padding(vertical=8.dp),color=AppColors.Border)
-  Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly){
-   Column(horizontalAlignment=Alignment.CenterHorizontally){Text("${db.streak()}",fontSize=30.sp,fontWeight=FontWeight.Light);Text("连续完成 / 天",color=AppColors.Muted,fontSize=12.sp)}
-   Column(horizontalAlignment=Alignment.CenterHorizontally){Text("${db.bestStreak()}",fontSize=30.sp,fontWeight=FontWeight.Light);Text("最长连续 / 天",color=AppColors.Muted,fontSize=12.sp)}
+  Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+   Text("等级 $level · $rank",style=MaterialTheme.typography.titleLarge)
+   Text("距下一级 ${500-xp%500} XP",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
+   LinearProgressIndicator(progress={progress},modifier=Modifier.fillMaxWidth().height(3.dp),color=AppColors.Accent,trackColor=AppColors.Raised)
   }
+ }
+ Row(Modifier.fillMaxWidth().padding(top=4.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+  Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(2.dp)){Text("${db.streak()} 天",style=MaterialTheme.typography.titleLarge);Text("当前连续完成",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)}
+  Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(2.dp)){Text("${db.bestStreak()} 天",style=MaterialTheme.typography.titleLarge);Text("最长连续记录",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)}
  }
 }

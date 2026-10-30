@@ -170,7 +170,7 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
  fun rewardHistory(): List<String> {
   val out=mutableListOf<String>()
   readableDatabase.rawQuery("SELECT l.day,l.kind,l.amount,l.task_id,l.created,t.title FROM ledger l LEFT JOIN tasks t ON t.id=l.task_id WHERE l.amount<>0 ORDER BY l.created DESC,l.rowid DESC LIMIT 100",null).use {c->while(c.moveToNext()) {
-   val amount=c.getLong(2);val source=c.getString(3);val label=when{source=="expiry"->"到期清零";source=="usage"->"使用";amount<0->"撤销冲正";source=="base"->"必做基础奖励";else->"选做奖励 · ${c.getString(5)?:"历史任务"}"};val value=if(c.getString(1)=="video") "${"%.1f".format(kotlin.math.abs(amount)/60000.0)} 分钟" else "${kotlin.math.abs(amount)} 局";val time=java.time.Instant.ofEpochMilli(c.getLong(4)).atZone(java.time.ZoneId.systemDefault()).toLocalTime().toString().take(5);out.add("${c.getString(0)} $time · $label\n${if(amount>0) "+" else "−"}$value")
+   val amount=c.getLong(2);val source=c.getString(3);val date=LocalDate.parse(c.getString(0));val absolute=kotlin.math.abs(amount);val value=if(c.getString(1)=="video") {val minutes=absolute/60000;val seconds=absolute%60000/1000;when{minutes==0L->"${seconds.coerceAtLeast(1)} 秒";seconds==0L->"$minutes 分钟";else->"$minutes 分 $seconds 秒"}} else "${absolute} 局";val label=when{source=="expiry"->"额度到期 −$value";source=="usage"->"已使用 $value";amount<0->"奖励冲回 −$value";source=="base"->"基础奖励 +$value";else->"选做奖励 · ${c.getString(5)?:"历史任务"} +$value"};val time=java.time.Instant.ofEpochMilli(c.getLong(4)).atZone(java.time.ZoneId.systemDefault()).toLocalTime().toString().take(5);out.add("${date.monthValue}月${date.dayOfMonth}日 $time · $label")
   } }
   return out
  }

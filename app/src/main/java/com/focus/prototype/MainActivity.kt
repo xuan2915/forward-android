@@ -45,7 +45,7 @@ class MainActivity : ComponentActivity() {
  override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); receiveText(intent); shareVersion++; refresh++ }
  override fun onResume() { super.onResume(); refresh++ }
  override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState)
-  window.statusBarColor=android.graphics.Color.rgb(14,17,16);window.navigationBarColor=android.graphics.Color.rgb(14,17,16);window.decorView.systemUiVisibility=0
+  window.statusBarColor=android.graphics.Color.rgb(17,18,20);window.navigationBarColor=android.graphics.Color.rgb(17,18,20);window.decorView.systemUiVisibility=0
   if(Build.VERSION.SDK_INT>=29){window.isNavigationBarContrastEnforced=false;window.isStatusBarContrastEnforced=false}
   receiveText(intent)
   val db = Database(this); val store = Store(this)
@@ -53,7 +53,7 @@ class MainActivity : ComponentActivity() {
   val launch = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
   val apps = packageManager.queryIntentActivities(launch,0).filter { store.canRestrict(it.activityInfo.packageName) }.distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(packageManager).toString() }
   setContent {
-   var page by remember { mutableIntStateOf(if(db.setting("import_draft").isNotBlank()) 3 else 0) }; var editor by remember { mutableStateOf(false) };var dataVersion by remember {mutableIntStateOf(0)}
+   var page by remember { mutableIntStateOf(if(db.setting("import_draft").isNotBlank()) 3 else 0) }; var editor by remember { mutableStateOf(false) };var dataVersion by remember {mutableIntStateOf(0)};var rewardHistoryExpanded by remember {mutableStateOf(false)}
    var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }
    LaunchedEffect(shareVersion) { if(shareVersion>0) { page=3;editor=false } }
    LaunchedEffect(Unit) { while(true) { db.settleToday();focusTimer.advance();if(now%10L==0L)db.checkpoint();now++; delay(1000) } }
@@ -63,7 +63,7 @@ class MainActivity : ComponentActivity() {
     androidx.activity.compose.BackHandler(enabled=page==5 || editor) {if(editor)editor=false else page=0}
     Scaffold(containerColor=AppColors.Background, bottomBar = { AppNavigation(page){page=it;editor=false} }) { pad ->
      AnimatedContent(targetState=page,transitionSpec={fadeIn(tween(AppMotion.Standard))+slideInHorizontally(tween(AppMotion.Standard)){it/28} togetherWith fadeOut(tween(AppMotion.Short))+slideOutHorizontally(tween(AppMotion.Short)){ -it/36 }},label="page-transition") { screen ->
-     LazyColumn(Modifier.fillMaxSize().padding(pad).padding(horizontal=AppSpace.Page), contentPadding=PaddingValues(top=AppSpace.XLarge,bottom=32.dp), verticalArrangement=Arrangement.spacedBy(AppSpace.Large)) {
+     LazyColumn(Modifier.fillMaxSize().padding(pad).padding(horizontal=AppSpace.Page), contentPadding=PaddingValues(top=AppSpace.XLarge,bottom=88.dp), verticalArrangement=Arrangement.spacedBy(AppSpace.Large)) {
       if(editor) {
        item { TaskEditor(targetDay, db, onCancel={ editor=false }, onSave={ editor=false; refresh++ }) }
       } else when(screen) {
@@ -81,23 +81,33 @@ class MainActivity : ComponentActivity() {
         items(tasks,key={it.id}) { task -> TaskCard(task,db,focusTimer,onFocus={page=4},onChanged={refresh++}) }
        }
        1 -> {
-        item { Header("娱乐时间", "娱乐，由行动开启") }
-        item { CardBlock { Text(if(!protected) "保护未开启" else if(c.emergency) "今日已紧急解锁" else if(!db.eligible()) "尚未解锁 · 请先完成必做任务" else if(!c.baseClaimed) "已达标 · 可领取基础时间" else if(db.balance("video")>0) "已解锁 · 可以使用视频时间" else "视频时间已用完",color=if(db.eligible()) AppColors.Accent else AppColors.Muted); Text("${db.balance("video") / 60000}",fontSize=52.sp,fontWeight=FontWeight.Light); Text("共享视频分钟  ·  剩余游戏 ${db.balance("game")} 局",color=AppColors.Muted); Text("抖音与 B站共用余额；游戏局数仅记录，不自动识别对局。",color=AppColors.Muted); if(c.emergency) TextButton(onClick={db.resumeProtection();refresh++}) {Text("恢复保护")}; if(db.eligible() && !c.baseClaimed) PrimaryAction("领取基础时间",{db.grantBase(); refresh++}); if(db.balance("game") > 0) TextButton(onClick={db.consume("game",1); refresh++}) { Text("手动记录已使用一局") } } }
+        item { Header("奖励与额度", "娱乐时间") }
+        item { CardBlock {
+         Text(if(!protected) "保护未开启" else if(c.emergency) "今天已紧急解锁" else if(!db.eligible()) "完成必做任务后解锁" else if(!c.baseClaimed) "今日任务已达标" else if(db.balance("video")>0) "已解锁 · 可以使用" else "今日额度已用完",color=if(db.eligible() && protected) AppColors.Accent else AppColors.Muted,style=MaterialTheme.typography.labelMedium)
+         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
+          Column(verticalArrangement=Arrangement.spacedBy(2.dp)) { Text("${db.balance("video") / 60000}",fontSize=38.sp,fontWeight=FontWeight.Light,lineHeight=42.sp); Text("分钟可用",color=AppColors.Muted,style=MaterialTheme.typography.bodySmall) }
+          Column(horizontalAlignment=Alignment.End,verticalArrangement=Arrangement.spacedBy(2.dp)) { Text("${db.balance("game")}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Light); Text("游戏局数",color=AppColors.Muted,style=MaterialTheme.typography.bodySmall) }
+         }
+         Hairline()
+         Text("抖音与 B站共用视频额度。游戏局数保留手动记录，不会把启动次数当作对局。",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
+         if(c.emergency) TextButton(onClick={db.resumeProtection();refresh++}) {Text("恢复保护")}
+         if(db.eligible() && !c.baseClaimed) PrimaryAction("领取今日娱乐时间",{db.grantBase(); refresh++},Modifier.fillMaxWidth())
+         if(db.balance("game") > 0) TextButton(onClick={db.consume("game",1); refresh++}) { Text("手动记录已使用一局") }
+        } }
         items(tasks.filter{!it.required && it.done && !it.claimed},key={it.id}) { task -> CardBlock { Text("${task.title} · 选择一项奖励"); Row { if(task.rewardMinutes>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"video");refresh++}) {Text("${task.rewardMinutes} 分钟")}; if(task.rewardGames>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"game");refresh++}) {Text("${task.rewardGames} 局") } }; if(!db.eligible()) Text("需先完成必做任务",color=Color.LightGray) } }
         item { CardBlock { Text("B站学习窗口",style=MaterialTheme.typography.titleMedium); Text("临时放行 15 分钟，不扣视频额度。",color=AppColors.Muted); PrimaryAction(if(db.learningActive()) "学习窗口进行中" else "开启 15 分钟学习窗口",{db.startLearning();refresh++},enabled=!db.learningActive()) } }
         if(!c.emergency)item {EmergencyUnlock(db){refresh++}}
         item { SecondaryAction("管理受限应用与权限",{page=5}) }
-        item { CardBlock { Text("奖励记录",fontSize=20.sp); val records=db.rewardHistory(); if(records.isEmpty()) Text("领取或使用奖励后，记录会保存在这里。",color=Color.Gray); records.forEach { Text(it,fontSize=13.sp,color=Color.LightGray) } } }
+        item { CardBlock { Text("奖励记录",style=MaterialTheme.typography.titleLarge); val records=db.rewardHistory(); if(records.isEmpty()) Text("领取或使用奖励后，记录会保存在这里。",color=AppColors.Muted); (if(rewardHistoryExpanded) records else records.take(4)).forEach { Text(it,style=MaterialTheme.typography.bodySmall,color=AppColors.Muted) }; if(records.size>4) TextButton(onClick={rewardHistoryExpanded=!rewardHistoryExpanded}) { Text(if(rewardHistoryExpanded) "收起记录" else "查看全部 ${records.size} 条记录") } } }
        }
        2 -> {
         item { Header("成长记录", "成长看得见") }
         item { GrowthHero(db) }
         item { GrowthDetails(db) }
-        items(db.history()) { (day,state) -> Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) { Text(day); Text(state,color=if(state=="休息") AppColors.Muted else AppColors.Accent) } }
        }
        3 -> {
         item { Header("今日总结 · $today", "为今天收个尾") }
-        item { CardBlock { Text("今日真实记录",style=MaterialTheme.typography.titleLarge); Text("完成 ${tasks.count{it.done}} / ${tasks.size} 项 · 专注 ${tasks.sumOf{db.elapsed(it)}/60000} 分钟"); tasks.forEach { Text("${if(it.done) "✓" else "○"} ${it.title}  ${db.elapsed(it)/60000} / ${it.minutes} 分钟",color=AppColors.Muted) } } }
+        item { CardBlock { Text("今日真实记录",style=MaterialTheme.typography.titleLarge); Text("完成 ${tasks.count{it.done}} / ${tasks.size} 项 · 专注 ${focusDuration(tasks.sumOf{db.elapsed(it)})}"); tasks.forEach { val elapsed=focusDuration(db.elapsed(it)); val duration=if(it.minutes>0) "$elapsed / 目标 ${it.minutes} 分钟" else "专注 $elapsed"; Text("${if(it.done) "✓" else "○"} ${it.title}  ·  $duration",color=AppColors.Muted) } } }
         item { ReviewEditor(db,today,dataVersion) { refresh++ } }
         item { ImportEditor(db,today,refresh) { refresh++ } }
         item { FuturePlan(db,onAdd={targetDay=it;editor=true}){refresh++} }
@@ -123,6 +133,11 @@ class MainActivity : ComponentActivity() {
 @Composable private fun Header(label:String,title:String) { PageHeading(label,title) }
 @Composable private fun CardBlock(content:@Composable ColumnScope.()->Unit) { QuietSurface(Modifier.animateContentSize(),content) }
 @Composable private fun NumberField(label:String,value:String,onValue:(String)->Unit) { OutlinedTextField(value,onValueChange={onValue(it.filter(Char::isDigit).take(4))},label={Text(label)},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),singleLine=true,modifier=Modifier.fillMaxWidth()) }
+private fun focusDuration(milliseconds:Long):String = when {
+ milliseconds < 60_000 -> "${milliseconds/1_000} 秒"
+ milliseconds < 3_600_000 -> "${milliseconds/60_000} 分钟"
+ else -> "${milliseconds/3_600_000} 小时 ${(milliseconds%3_600_000)/60_000} 分"
+}
 
 @Composable private fun ContractEditor(db:Database,c:Contract,onChanged:()->Unit) {
  var minutes by remember { mutableStateOf("30") }; var games by remember { mutableStateOf("0") }; var rest by remember { mutableStateOf(false) }
@@ -151,7 +166,7 @@ class MainActivity : ComponentActivity() {
  var checking by remember(task.id) { mutableStateOf(false) }; var selfCheck by remember(task.id) { mutableStateOf(false) }; var revoking by remember(task.id) { mutableStateOf(false) }
  CardBlock {
   Text("${if(task.required) "必做" else "选做"}  ·  ${task.mode}",color=AppColors.Muted,style=MaterialTheme.typography.labelMedium); Text(task.title,style=MaterialTheme.typography.titleLarge)
-  Text("${db.elapsed(task)/60000} 分钟 / 目标 ${task.minutes} 分钟   ·   ${if(task.done) "已完成" else if(task.runningSince>0) "计时中" else "未开始"}",color=AppColors.Muted)
+  Text("${if(task.minutes>0) "${focusDuration(db.elapsed(task))} / 目标 ${task.minutes} 分钟" else "专注 ${focusDuration(db.elapsed(task))}"}   ·   ${if(task.done) "已完成" else if(task.runningSince>0) "计时中" else "未开始"}",color=AppColors.Muted)
   if(task.checklist.isNotBlank()) Text("完成标准：${task.checklist}",color=AppColors.Muted)
   ProofActions(task,db,onChanged)
   if(task.done && !task.required && !task.claimed){Text("领取奖励 · 选择一项",fontSize=14.sp);Row{if(task.rewardMinutes>0)TextButton(enabled=db.eligible(),onClick={db.claim(task,"video");onChanged()}){Text("${task.rewardMinutes} 视频分钟")};if(task.rewardGames>0)TextButton(enabled=db.eligible(),onClick={db.claim(task,"game");onChanged()}){Text("${task.rewardGames} 游戏局数")}};if(!db.eligible())Text("完成全部必做后可领取",fontSize=12.sp,color=Color.Gray)}
@@ -170,5 +185,11 @@ class MainActivity : ComponentActivity() {
 
 @Composable private fun ReviewEditor(db:Database,day:String,version:Int,onSaved:()->Unit) {
  val saved = remember(day,version) { db.readReview(day) }; var problem by remember(day,version) { mutableStateOf(saved[0]) }; var praise by remember(day,version) { mutableStateOf(saved[1]) }; var note by remember(day,version) { mutableStateOf(saved[2]) }
- CardBlock { OutlinedTextField(problem,onValueChange={problem=it},label={Text("遇到的问题")},modifier=Modifier.fillMaxWidth()); OutlinedTextField(praise,onValueChange={praise=it},label={Text("今天值得肯定的地方")},modifier=Modifier.fillMaxWidth()); OutlinedTextField(note,onValueChange={note=it},label={Text("自由记录")},modifier=Modifier.fillMaxWidth()); Button(onClick={db.review(day,problem,praise,note);onSaved()}) {Text("保存复盘")} }
+ CardBlock {
+  Text("简单回顾，给明天留一个方向。",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
+  OutlinedTextField(problem,onValueChange={problem=it},label={Text("今天遇到什么阻碍？")},modifier=Modifier.fillMaxWidth(),minLines=2,maxLines=3)
+  OutlinedTextField(praise,onValueChange={praise=it},label={Text("哪件事做得不错？")},modifier=Modifier.fillMaxWidth(),minLines=2,maxLines=3)
+  OutlinedTextField(note,onValueChange={note=it},label={Text("其他记录")},modifier=Modifier.fillMaxWidth(),minLines=2,maxLines=4)
+  PrimaryAction("保存今日总结",{db.review(day,problem,praise,note);onSaved()},Modifier.fillMaxWidth())
+ }
 }

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -63,12 +64,12 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
     val running = phase == "work" || phase == "break"
     val activeTask = phase == "work" || phase == "paused" && pausedFrom == "work"
 
-    Column(Modifier.fillMaxWidth().padding(top = AppSpace.Large, bottom = AppSpace.XLarge), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.fillMaxWidth().padding(top = AppSpace.Medium, bottom = AppSpace.Large), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            PageHeading("专注时间", "把注意力收回来。")
+            PageHeading("专注 · 今日任务", "专注时间")
             StatusPill(if (phase == "work") "正在专注" else if (phase == "break") "正在休息" else "本地计时", active = running)
         }
-        Spacer(Modifier.height(AppSpace.Large))
+        Spacer(Modifier.height(AppSpace.Medium))
 
         if (phase == "ready") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -89,9 +90,9 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
             }
         }
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(14.dp))
         FocusDial(
-            Modifier.size(286.dp),
+            Modifier.size(232.dp),
             animatedFraction,
             timer.elapsed(),
             freeMode,
@@ -99,7 +100,7 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
             time,
             if (phase == "break" || phase == "paused" && pausedFrom == "break") "休息" else if (phase == "work" || activeTask) "专注" else "准备开始",
         )
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(12.dp))
         Text(
             when {
                 phase == "work" -> "保持节奏。"
@@ -112,7 +113,7 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
             color = AppColors.Text,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
         if (selected != null) {
             Box {
                 TextButton(enabled = phase == "ready", onClick = { chooseTask = true }) {
@@ -131,7 +132,7 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
             Text("今天没有待做任务", color = AppColors.Muted, style = MaterialTheme.typography.bodyMedium)
         }
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(12.dp))
         when (phase) {
             "ready" -> PrimaryAction("开始专注", { selected?.let(timer::begin); onChanged() }, Modifier.fillMaxWidth(), selected != null)
             "work" -> {
@@ -150,7 +151,7 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
                 SecondaryAction("结束本次", { timer.finish(); onChanged() }, Modifier.fillMaxWidth())
             }
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(10.dp))
         Text(
             when {
                 phase == "break" -> "休息时间不会计入任务专注时长"
@@ -180,7 +181,7 @@ private fun FocusDial(
     label: String,
 ) {
     Box(modifier, contentAlignment = Alignment.Center) {
-        Canvas(Modifier.size(286.dp).padding(5.dp)) {
+        Canvas(Modifier.fillMaxSize().padding(5.dp)) {
             val stroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
             drawArc(AppColors.Raised, -90f, 360f, false, style = stroke)
             if (free) {
@@ -193,7 +194,7 @@ private fun FocusDial(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(label, style = MaterialTheme.typography.labelMedium, color = AppColors.Muted)
             Spacer(Modifier.height(6.dp))
-            Text(time, style = MaterialTheme.typography.displayLarge.copy(fontSize = 58.sp, fontWeight = FontWeight.Light), color = AppColors.Text, maxLines = 1)
+            Text(time, style = MaterialTheme.typography.displayMedium.copy(fontSize = 46.sp, fontWeight = FontWeight.Light), color = AppColors.Text, maxLines = 1)
             Text(if (free && !rest) "自由计时" else if (rest) "呼吸片刻" else "专注时间", style = MaterialTheme.typography.bodySmall, color = AppColors.Quiet)
         }
     }

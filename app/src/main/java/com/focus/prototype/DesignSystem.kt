@@ -33,26 +33,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 object AppColors {
-    val Background = Color(0xFF0E1110)
-    val Surface = Color(0xFF171B19)
-    val Raised = Color(0xFF202522)
-    val Border = Color(0xFF2C332F)
-    val Text = Color(0xFFF0F2ED)
-    val Muted = Color(0xFF9AA39C)
-    val Quiet = Color(0xFF6F7972)
-    val Accent = Color(0xFFA8BBAA)
-    val AccentInk = Color(0xFF172019)
-    val AccentWash = Color(0xFF202B24)
-    val Warning = Color(0xFFD59A8E)
+    val Background = Color(0xFF111214)
+    val Surface = Color(0xFF191B1F)
+    val Raised = Color(0xFF23262A)
+    val Border = Color(0xFF32353A)
+    val Text = Color(0xFFF1F0ED)
+    val Muted = Color(0xFFA1A4A7)
+    val Quiet = Color(0xFF74787D)
+    val Accent = Color(0xFFA6B8AE)
+    val AccentInk = Color(0xFF161B18)
+    val AccentWash = Color(0xFF252D29)
+    val Warning = Color(0xFFC99186)
 }
 
 object AppSpace {
     val Tiny = 4.dp
     val Small = 8.dp
     val Medium = 12.dp
-    val Large = 20.dp
-    val XLarge = 28.dp
-    val Page = 24.dp
+    val Large = 16.dp
+    val XLarge = 24.dp
+    val Page = 22.dp
 }
 
 object AppMotion {
@@ -61,13 +61,13 @@ object AppMotion {
 }
 
 private val AppTypography = Typography(
-    displayLarge = TextStyle(fontSize = 60.sp, lineHeight = 68.sp, fontWeight = FontWeight.Light, letterSpacing = (-1.2).sp),
-    displayMedium = TextStyle(fontSize = 46.sp, lineHeight = 54.sp, fontWeight = FontWeight.Light, letterSpacing = (-0.8).sp),
-    displaySmall = TextStyle(fontSize = 38.sp, lineHeight = 46.sp, fontWeight = FontWeight.Normal, letterSpacing = (-0.5).sp),
-    headlineLarge = TextStyle(fontSize = 32.sp, lineHeight = 40.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.3).sp),
-    headlineMedium = TextStyle(fontSize = 27.sp, lineHeight = 35.sp, fontWeight = FontWeight.SemiBold),
-    headlineSmall = TextStyle(fontSize = 23.sp, lineHeight = 31.sp, fontWeight = FontWeight.Medium),
-    titleLarge = TextStyle(fontSize = 21.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold),
+    displayLarge = TextStyle(fontSize = 50.sp, lineHeight = 58.sp, fontWeight = FontWeight.Light, letterSpacing = (-1.1).sp),
+    displayMedium = TextStyle(fontSize = 40.sp, lineHeight = 48.sp, fontWeight = FontWeight.Light, letterSpacing = (-0.8).sp),
+    displaySmall = TextStyle(fontSize = 32.sp, lineHeight = 40.sp, fontWeight = FontWeight.Normal, letterSpacing = (-0.5).sp),
+    headlineLarge = TextStyle(fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.3).sp),
+    headlineMedium = TextStyle(fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold),
+    headlineSmall = TextStyle(fontSize = 21.sp, lineHeight = 29.sp, fontWeight = FontWeight.Medium),
+    titleLarge = TextStyle(fontSize = 19.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold),
     titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 23.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.1.sp),
     titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
     bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 25.sp, letterSpacing = 0.1.sp),
@@ -132,8 +132,8 @@ fun SectionHeading(title: String, trailing: (@Composable () -> Unit)? = null) {
 @Composable
 fun QuietSurface(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(AppColors.Surface).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(AppSpace.Medium),
+        modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(AppColors.Surface).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
         content = content,
     )
 }
@@ -143,9 +143,9 @@ fun PrimaryAction(label: String, onClick: () -> Unit, modifier: Modifier = Modif
     val haptic = LocalHapticFeedback.current
     Button(
         onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onClick() },
-        modifier = modifier.height(54.dp),
+        modifier = modifier.height(52.dp),
         enabled = enabled,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = AppColors.Accent,
             contentColor = AppColors.AccentInk,
@@ -159,9 +159,9 @@ fun PrimaryAction(label: String, onClick: () -> Unit, modifier: Modifier = Modif
 fun SecondaryAction(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier.height(50.dp),
+        modifier = modifier.height(48.dp),
         enabled = enabled,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         border = BorderStroke(1.dp, if (enabled) AppColors.Border else AppColors.Raised),
         colors = ButtonDefaults.outlinedButtonColors(contentColor = AppColors.Text, disabledContentColor = AppColors.Quiet),
     ) { Text(label, style = MaterialTheme.typography.titleSmall) }
