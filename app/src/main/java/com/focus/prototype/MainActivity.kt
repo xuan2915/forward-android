@@ -60,7 +60,7 @@ class MainActivity : ComponentActivity() {
        item { TaskEditor(targetDay, db, onCancel={ editor=false }, onSave={ editor=false; refresh++ }) }
       } else when(page) {
        0 -> {
-        item { Header("TODAY / $today", "今天，向前一步") }; item { ProgressView(tasks.count{it.required && it.done},tasks.count{it.required}) }
+        item { Header("TODAY / $today", "今天，向前一步"); if(db.setting("changed_$today")=="true") Text("今日计划已变更，原要求与原因保存在成长记录中。",color=Color.Gray) }; item { ProgressView(tasks.count{it.required && it.done},tasks.count{it.required}) }
         item { CardBlock { Text(if(c.confirmed) "今日任务已确认" else "请先确认今日任务",fontSize=20.sp,fontWeight=FontWeight.Bold); Text("必做 ${tasks.count{it.required && it.done}} / ${tasks.count{it.required}}  ·  选做 ${tasks.count{!it.required && it.done}} / ${tasks.count{!it.required}}",color=Color.LightGray); Text(if(db.eligible()) "必做任务已全部完成" else "完成全部必做任务，自动解锁娱乐时间",color=Red) } }
         if(!protected) item { CardBlock { Text("保护未生效：请开启无障碍服务",color=Red); Button(onClick={ startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }) { Text("前往授权") } } }
         if(!c.confirmed) item { ContractEditor(db, c) { refresh++ } }
@@ -83,14 +83,14 @@ class MainActivity : ComponentActivity() {
        2 -> {
         item { Header("GROWTH / YOUR JOURNEY", "成长看得见") }
         item { CardBlock { val xp=db.xp(); val rank=listOf("启程","萌芽","探索","积累","进阶","坚韧","精进","卓越")[(xp/500).coerceAtMost(7)]; Text("$xp",fontSize=56.sp,fontWeight=FontWeight.Bold); Text("XP  /  等级 ${xp/500+1}  /  $rank",fontSize=18.sp); Text("连续完成 ${db.streak()} 天 · 休息日保留连续记录",color=Color.LightGray); Text("经验来自已验收任务，不可兑换娱乐。",color=Color.LightGray) } }
-        item { Text("成长记录",fontSize=21.sp,fontWeight=FontWeight.Bold) }
+        item { GrowthDetails(db) }
         items(db.history()) { (day,state) -> Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) { Text(day); Text(state,color=if(state=="休息") Color.LightGray else Red) } }
        }
        3 -> {
         item { Header("REFLECTION / $today", "为今天收个尾") }
         item { CardBlock { Text("今日真实记录",fontSize=20.sp); Text("完成 ${tasks.count{it.done}} / ${tasks.size} 项 · 专注 ${tasks.sumOf{db.elapsed(it)}/60000} 分钟"); tasks.forEach { Text("${if(it.done) "✓" else "○"} ${it.title}  ${db.elapsed(it)/60000} / ${it.minutes} 分钟",color=Color.LightGray) } } }
         item { ReviewEditor(db,today) { refresh++ } }
-        item { ImportEditor(db,today,refresh) { refresh++ } }
+        item { ImportEditor(db,today,refresh) { refresh++ } }; item { DaySettings(db) {refresh++} }; item { BackupView(db) {refresh++} }
         item { val tomorrow=LocalDate.parse(today).plusDays(1).toString(); CardBlock { Text("明日计划 · $tomorrow",fontSize=20.sp); db.tasks(tomorrow).forEach { Text("${if(it.required) "必做" else "选做"} · ${it.title}") }; OutlinedButton(onClick={targetDay=tomorrow;editor=true}) {Text("添加明日任务")}; Text("明日计划到当天后确认。",color=Color.LightGray) } }
        }
       }
@@ -132,16 +132,13 @@ class MainActivity : ComponentActivity() {
   Text("${if(task.required) "必做" else "选做"}  /  ${task.mode}",color=Red,fontSize=12.sp); Text(task.title,fontSize=20.sp,fontWeight=FontWeight.Bold)
   Text("${db.elapsed(task)/60000} 分 ${db.elapsed(task)/1000%60} 秒 / 目标 ${task.minutes} 分钟   ${if(task.done) "已完成" else if(task.runningSince>0) "计时中" else "未完成"}")
   if(task.checklist.isNotBlank()) Text("预设条件：${task.checklist}",color=Color.LightGray)
-  if(task.evidence.isNotBlank()) Text("已保存本地照片",color=Color.LightGray)
+  ProofActions(task,db,onChanged)
   if(task.done) { TextButton(onClick={revoking=true}) {Text("撤销误完成")}; if(revoking) { Text("撤销后将按可用余额冲正已领取奖励；已消费的额度无法追回。",color=Color.LightGray); Row { Button(onClick={db.revoke(task);revoking=false;onChanged()}) {Text("确认撤销")}; TextButton(onClick={revoking=false}) {Text("取消")} } } }
-  if(!task.done) {
-   Row { if(task.runningSince>0) TextButton(onClick={db.pause(task);onChanged()}) {Text("暂停 / 停止")} else TextButton(onClick={ db.runningTasks().forEach{db.pause(it)}; db.start(task);onChanged() }) {Text("开始专注")}; if(task.mode!="行动型") TextButton(onClick=onPhoto){Text("拍照证明")} }
+  if(!task.done) { TaskChanges(task,db,onChanged)
+   Row { if(task.runningSince>0) TextButton(onClick={db.pause(task);onChanged()}) {Text("暂停 / 停止")} else TextButton(onClick={ db.runningTasks().forEach{db.pause(it)}; db.start(task);onChanged() }) {Text("开始专注")} }
    TextButton(onClick={checking=!checking}) {Text("确认完成")}
    if(checking) { Row(verticalAlignment=Alignment.CenterVertically) { Checkbox(selfCheck,onCheckedChange={selfCheck=it}); Text("我已按预设条件完成${if(task.mode=="掌握型") "独立练习或解释" else ""}") }; val allowed = selfCheck && db.elapsed(task)>=task.minutes*60000L && (task.mode=="行动型" || task.evidence.isNotBlank()); Button(enabled=allowed,onClick={db.complete(task);db.grantBase(task.date);checking=false;onChanged()}) {Text("完成任务")}; Text("自检与照片不代表 AI 或客观真实性核验。",fontSize=12.sp,color=Color.Gray) }
-   if(!db.contract(task.date).confirmed) {
-    Row { TextButton(onClick={editing=!editing}) { Text("编辑任务") }; TextButton(onClick={db.removeDraft(task);onChanged()}) { Text("删除草稿任务") } }
-    if(editing) { OutlinedTextField(title,onValueChange={title=it},label={Text("任务名称")}); NumberField("目标分钟",minutes){minutes=it}; OutlinedTextField(checklist,onValueChange={checklist=it},label={Text("完成条件")}); Button(enabled=title.isNotBlank(),onClick={db.editDraft(task,title,minutes.toIntOrNull()?:0,checklist);editing=false;onChanged()}) { Text("保存修改") } }
-   }
+
   }
  }
 }

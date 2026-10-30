@@ -36,7 +36,7 @@ class Database(context: Context) : SQLiteOpenHelper(context, "journey.db", null,
  }
  fun day(): String {
   val now = LocalDateTime.now(); val boundary = setting("boundary", "4").toIntOrNull()?.coerceIn(0, 23) ?: 4
-  return (if (now.hour < boundary) now.toLocalDate().minusDays(1) else now.toLocalDate()).toString()
+  val pending=setting("boundary_effective"); if(pending.isNotEmpty() && now >= LocalDateTime.parse(pending)) { val next=setting("boundary_next").toInt(); setSetting("boundary",next.toString()); setSetting("boundary_effective",""); return Rules.day(now,next) }; return Rules.day(now,boundary)
  }
  fun ensure(day: String = day()) {
   val db = writableDatabase
@@ -47,10 +47,11 @@ class Database(context: Context) : SQLiteOpenHelper(context, "journey.db", null,
    if(confirmed == null) db.insert("contracts", null, cv("day" to day, "boundary" to setting("boundary", "4").toInt()))
    db.rawQuery("SELECT * FROM tasks WHERE day=origin AND origin<? AND recurrence != 'once'", arrayOf(day)).use { c ->
     while(c.moveToNext()) {
-     val recurrence = c.s("recurrence")
-     if (recurrence == "daily" || recurrence == "weekly" && LocalDate.parse(day).dayOfWeek == LocalDate.parse(c.s("origin")).dayOfWeek) {
+     val override=org.json.JSONObject(setting("template_${c.s("id")}","{}"))
+     val recurrence = override.optString("recurrence",c.s("recurrence"))
+     if (Rules.repeats(recurrence,c.s("origin"),day)) {
       val instanceId = UUID.nameUUIDFromBytes((c.s("id") + day).toByteArray()).toString()
-      db.insertWithOnConflict("tasks", null, cv("id" to instanceId, "day" to day, "title" to c.s("title"), "required" to c.i("required"), "minutes" to c.i("minutes"), "mode" to c.s("mode"), "checklist" to c.s("checklist"), "reward_minutes" to c.i("reward_minutes"), "reward_games" to c.i("reward_games"), "recurrence" to recurrence, "origin" to c.s("origin")), SQLiteDatabase.CONFLICT_IGNORE)
+      if(setting("deleted_$instanceId") != "true") db.insertWithOnConflict("tasks", null, cv("id" to instanceId, "day" to day, "title" to override.optString("title",c.s("title")), "required" to override.optInt("required",c.i("required")), "minutes" to override.optInt("minutes",c.i("minutes")), "mode" to override.optString("mode",c.s("mode")), "checklist" to override.optString("checklist",c.s("checklist")), "reward_minutes" to override.optInt("video",c.i("reward_minutes")), "reward_games" to override.optInt("games",c.i("reward_games")), "recurrence" to recurrence, "origin" to c.s("origin")), SQLiteDatabase.CONFLICT_IGNORE)
      }
     }
    }
@@ -83,7 +84,16 @@ class Database(context: Context) : SQLiteOpenHelper(context, "journey.db", null,
  fun evidence(task: Task, path: String) { writableDatabase.update("tasks",cv("evidence" to path),"id=?",arrayOf(task.id)) }
  fun complete(task: Task) { pause(task); val fresh=tasks(task.date).first { it.id == task.id }; require(fresh.elapsed >= fresh.minutes * 60000L && (fresh.mode == "行动型" || fresh.evidence.isNotBlank())); writableDatabase.update("tasks",cv("done" to true),"id=?",arrayOf(task.id)) }
  fun removeDraft(task: Task) { require(!contract(task.date).confirmed && !task.done); writableDatabase.delete("tasks","id=?",arrayOf(task.id)) }
+ fun scheduleBoundary(hour:Int) { require(hour in 0..23); val old=setting("boundary","4").toInt(); val effective=LocalDate.parse(day()).plusDays(1).atStartOfDay().plusHours(maxOf(old,hour).toLong()); setSetting("boundary_next",hour.toString()); setSetting("boundary_effective",effective.toString()); audit(day(),"日界线将于 $effective 改为 $hour:00") }
+ fun revise(task:Task,title:String,required:Boolean,minutes:Int,mode:String,checklist:String,video:Int,games:Int,recurrence:String,reason:String,delete:Boolean=false) {
+  val db=writableDatabase; db.beginTransaction()
+  try { val frozen=contract(task.date).confirmed; require(!task.done && title.isNotBlank() && (!frozen || reason.isNotBlank())); if(frozen) { audit(task.date,"计划变更：${task.title} / 必做=${task.required} / ${task.minutes}分钟 / ${task.mode} / ${task.checklist} → $title / 必做=$required / $minutes 分钟 / $mode / $checklist / 删除=$delete；原因：$reason"); setSetting("changed_${task.date}","true") }
+   db.rawQuery("SELECT id FROM tasks WHERE day=origin",null).use { cursor -> while(cursor.moveToNext()) { val id=cursor.getString(0); if(id==task.id || UUID.nameUUIDFromBytes((id+task.date).toByteArray()).toString()==task.id) setSetting("template_$id",org.json.JSONObject().put("title",title).put("required",if(required) 1 else 0).put("minutes",minutes).put("mode",mode).put("checklist",checklist).put("video",video).put("games",games).put("recurrence",if(delete) "once" else recurrence).toString()) } }; if(delete) { setSetting("deleted_${task.id}","true"); db.delete("tasks","id=?",arrayOf(task.id)) } else db.update("tasks",cv("title" to title,"required" to required,"minutes" to minutes,"mode" to mode,"checklist" to checklist,"reward_minutes" to video,"reward_games" to games,"recurrence" to recurrence),"id=?",arrayOf(task.id))
+   db.setTransactionSuccessful()
+  } finally { db.endTransaction() }
+ }
  fun editDraft(task: Task, title:String, minutes:Int, checklist:String) { require(!contract(task.date).confirmed && !task.done && title.isNotBlank()); writableDatabase.update("tasks",cv("title" to title.trim(),"minutes" to minutes,"checklist" to checklist),"id=?",arrayOf(task.id)) }
+ fun recurrence(task:Task):String = readableDatabase.rawQuery("SELECT recurrence FROM tasks WHERE id=?",arrayOf(task.id)).use {if(it.moveToFirst())it.getString(0) else "once"}
  fun rewardHistory(): List<String> {
   val out=mutableListOf<String>()
   readableDatabase.rawQuery("SELECT day,kind,SUM(CASE WHEN amount>0 THEN amount ELSE 0 END),SUM(CASE WHEN amount<0 THEN -amount ELSE 0 END) FROM ledger GROUP BY day,kind ORDER BY day DESC LIMIT 30",null).use { c -> while(c.moveToNext()) { val video=c.getString(1)=="video"; val divisor=if(video) 60000.0 else 1.0; out.add("${c.getString(0)} · ${if(video) "视频分钟" else "游戏局数"}  获得 ${"%.1f".format(c.getLong(2)/divisor)} / 使用与冲正 ${"%.1f".format(c.getLong(3)/divisor)}") } }
