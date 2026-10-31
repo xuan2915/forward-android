@@ -60,6 +60,7 @@ fun TaskDetailSheet(
     timer: FocusTimer,
     onDismiss: () -> Unit,
     onFocus: () -> Unit,
+    onAnalytics: () -> Unit,
     onChanged: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
@@ -82,6 +83,7 @@ fun TaskDetailSheet(
     val active = timer.taskId == task.id && timer.phase == "work"
     val paused = timer.taskId == task.id && timer.phase == "paused"
     val elapsed = db.elapsed(task)
+    val completionMode = if (task.mode == "timer") "计时" else task.mode
     val canComplete = selfCheck && elapsed >= task.minutes * 60_000L && (task.mode == "行动型" || task.evidence.isNotBlank())
 
     AnimatedVisibility(
@@ -130,9 +132,12 @@ fun TaskDetailSheet(
                     Text("专注记录", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(task.mode, style = MaterialTheme.typography.titleMedium)
+                    Text(completionMode, style = MaterialTheme.typography.titleMedium)
                     Text("完成方式", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
                 }
+            }
+            TextButton(onClick = { dismiss(onAnalytics) }, modifier = Modifier.align(Alignment.End)) {
+                Text("查看成长统计")
             }
             if (task.checklist.isNotBlank()) {
                 QuietSurface(color = MaterialTheme.colorScheme.surfaceContainer) {

@@ -54,16 +54,30 @@ class MainActivity : ComponentActivity() {
   val apps = packageManager.queryIntentActivities(launch,0).filter { store.canRestrict(it.activityInfo.packageName) }.distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(packageManager).toString() }
   setContent {
     var page by remember { mutableIntStateOf(if(db.setting("import_draft").isNotBlank()) 3 else 0) }; var editor by remember { mutableStateOf(false) };var dataVersion by remember {mutableIntStateOf(0)};var rewardHistoryExpanded by remember {mutableStateOf(false)};var taskFilter by remember { mutableIntStateOf(0) }
-    var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }
+    var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }; var gritAnalyticsTaskId by remember { mutableStateOf<String?>(null) }; var showContractDialog by remember { mutableStateOf(false) }
    LaunchedEffect(shareVersion) { if(shareVersion>0) { page=3;editor=false } }
    LaunchedEffect(Unit) { while(true) { db.settleToday();focusTimer.advance();if(now%10L==0L)db.checkpoint();now++; delay(1000) } }
    val tick = now + refresh; val today = db.day(); val c = remember(today,tick) { db.contract(today) }; val tasks = remember(today,tick) { db.tasks(today) }
    val protected = remember(tick) { val id = ComponentName(this,FocusService::class.java).flattenToString(); FocusService.connected && Settings.Secure.getString(contentResolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)?.split(':')?.any { it.equals(id,true) } == true }
    FocusTheme { MotionHost(db.xp(),showToast=page!=2) {
-      androidx.activity.compose.BackHandler(enabled=page==5 || editor) { if(editor) editor=false else page=0 }
-    Scaffold(containerColor=AppColors.Background, bottomBar = { if(taskDetailsId==null) AppNavigation(page){page=it;editor=false} }) { pad ->
+       androidx.activity.compose.BackHandler(enabled=gritAnalyticsTaskId!=null || page==5 || editor || showContractDialog) {
+        when { showContractDialog -> showContractDialog=false; gritAnalyticsTaskId!=null -> gritAnalyticsTaskId=null; editor -> editor=false; else -> page=0 }
+       }
+     Scaffold(containerColor=AppColors.Background, bottomBar = { if(taskDetailsId==null && gritAnalyticsTaskId==null) AppNavigation(page){page=it;editor=false;gritAnalyticsTaskId=null} }) { pad ->
      Box(Modifier.fillMaxSize()) {
-     AnimatedContent(targetState=page,transitionSpec={fadeIn(tween(AppMotion.Standard))+slideInHorizontally(tween(AppMotion.Standard)){it/28} togetherWith fadeOut(tween(AppMotion.Short))+slideOutHorizontally(tween(AppMotion.Short)){ -it/36 }},label="page-transition") { screen ->
+      AnimatedContent(targetState=page,transitionSpec={fadeIn(tween(AppMotion.Standard))+slideInHorizontally(tween(AppMotion.Standard)){it/28} togetherWith fadeOut(tween(AppMotion.Short))+slideOutHorizontally(tween(AppMotion.Short)){ -it/36 }},label="page-transition") { screen ->
+      if (!editor && screen == 0) {
+       GritTaskListPage(
+        modifier=Modifier.fillMaxSize().padding(pad), date=today, tasks=tasks,
+        continuing=db.runningTasks().filter { it.date != today }, filter=taskFilter,
+        confirmed=c.confirmed,
+        onFilter={taskFilter=it}, onAdd={targetDay=today;editor=true},
+        onPlan={showContractDialog=true}, onSettings={page=5},
+        onDetails={taskDetailsId=it.id},
+       )
+      } else if (!editor && screen == 2 && gritAnalyticsTaskId != null) {
+       GritHabitAnalyticsPage(db,gritAnalyticsTaskId!!,refresh, Modifier.padding(pad)) { gritAnalyticsTaskId=null }
+      } else {
      val listState=remember(screen){androidx.compose.foundation.lazy.LazyListState()}
      LazyColumn(state=listState,modifier=Modifier.fillMaxSize().padding(pad).padding(horizontal=AppSpace.Page), contentPadding=PaddingValues(top=AppSpace.XLarge,bottom=88.dp), verticalArrangement=Arrangement.spacedBy(AppSpace.Large)) {
       if(editor) {
@@ -134,6 +148,15 @@ class MainActivity : ComponentActivity() {
         items(apps,key={it.activityInfo.packageName}) {app->val pkg=app.activityInfo.packageName;Row(Modifier.fillMaxWidth().toggleable(value=pkg in store.selected,onValueChange={checked->store.selected=if(checked)store.selected+pkg else store.selected-pkg;refresh++}),verticalAlignment=Alignment.CenterVertically){Text(app.loadLabel(packageManager).toString(),modifier=Modifier.weight(1f));Checkbox(pkg in store.selected,onCheckedChange=null)}}
        }
       }
+      }
+      if(showContractDialog) androidx.compose.ui.window.Dialog(onDismissRequest={showContractDialog=false}) {
+       Surface(shape=RoundedCornerShape(28.dp),color=MaterialTheme.colorScheme.surface) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+         ContractEditor(db,c) { showContractDialog=false;refresh++ }
+         TextButton(onClick={showContractDialog=false},modifier=Modifier.align(Alignment.End)) { Text("稍后确认") }
+        }
+       }
+      }
      }
     }
      val detailTask = remember(taskDetailsId,tick) { taskDetailsId?.let(db::task) }
@@ -141,6 +164,7 @@ class MainActivity : ComponentActivity() {
      if(detailTask!=null) TaskDetailSheet(
       task=detailTask, db=db, timer=focusTimer,
       onDismiss={taskDetailsId=null}, onFocus={taskDetailsId=null;page=4}, onChanged={refresh++},
+      onAnalytics={taskDetailsId=null;gritAnalyticsTaskId=detailTask.id;page=2},
       )
      }
    }

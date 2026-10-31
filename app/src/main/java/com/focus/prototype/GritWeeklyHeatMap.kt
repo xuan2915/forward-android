@@ -46,19 +46,19 @@ fun GritWeeklyHeatMap(today: LocalDate, history: Map<String, String>, onDateSele
         val firstMonday = thisMonday.minusDays(51L * 7)
         (0..51).map { week -> GritWeek((0..6).map { firstMonday.plusDays(week * 7L + it) }) }
     }
-    val startIndex = (weeks.size - 13).coerceAtLeast(0)
+    val startIndex = (weeks.size - 9).coerceAtLeast(0)
     val state = rememberLazyListState(initialFirstVisibleItemIndex = startIndex)
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(24.dp)) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 13.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Column(Modifier.padding(top = 15.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 listOf("一", "二", "三", "四", "五", "六", "日").forEachIndexed { index, label ->
                     Text(
-                        if (index % 2 == 0) label else "",
-                        Modifier.width(17.dp).height(16.dp),
+                        label,
+                        Modifier.width(26.dp).height(35.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -68,16 +68,15 @@ fun GritWeeklyHeatMap(today: LocalDate, history: Map<String, String>, onDateSele
             LazyRow(
                 state = state,
                 modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                horizontalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 items(weeks) { week ->
-                    Column(Modifier.width(18.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Column(Modifier.width(36.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         val monthStart = week.dates.firstOrNull { it.dayOfMonth == 1 }
                         Text(
                             monthStart?.let { "${it.monthValue}月" }.orEmpty(),
-                            Modifier.height(13.dp).fillMaxWidth(),
+                            Modifier.height(18.dp).fillMaxWidth(),
                             style = MaterialTheme.typography.labelSmall,
-                            fontSize = 8.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
                             maxLines = 1,
@@ -94,16 +93,22 @@ fun GritWeeklyHeatMap(today: LocalDate, history: Map<String, String>, onDateSele
                             }
                             val color = when (status) {
                                 "完成" -> MaterialTheme.colorScheme.primary
-                                "休息" -> MaterialTheme.colorScheme.surfaceContainerHighest
-                                "未完成" -> MaterialTheme.colorScheme.errorContainer.copy(alpha = .76f)
-                                else -> if (date <= today) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = .45f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = .14f)
+                                "休息" -> MaterialTheme.colorScheme.surfaceContainerHigh
+                                else -> MaterialTheme.colorScheme.surface
                             }
                             Box(
-                            Modifier.size(16.dp)
-                                    .clip(if (position == StreakPosition.ISOLATED) RoundedCornerShape(5.dp) else gritHeatMapStreakShape(position, date.dayOfWeek.value == 1, date.dayOfWeek.value == 7))
+                                Modifier.size(35.dp)
+                                    .clip(if (position == StreakPosition.ISOLATED) RoundedCornerShape(20.dp) else gritHeatMapStreakShape(position, date.dayOfWeek.value == 1, date.dayOfWeek.value == 7))
                                     .background(color)
-                                    .clickable { onDateSelected(date) },
-                            )
+                                    .clickable(enabled = status != null && date <= today) { onDateSelected(date) },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    date.dayOfMonth.toString(),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontFamily = com.focus.prototype.gritFontRounded()),
+                                    color = if (status == "完成") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = if (status == null) .55f else 1f),
+                                )
+                            }
                         }
                     }
                 }

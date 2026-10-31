@@ -14,8 +14,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-// Adapted from GritTheme.android.kt: its fixed seed color, TONALSPOT scheme, and
-// Figtree typography. MaterialExpressiveTheme requires a newer Material3 than this app uses.
+// Adapted from GritTheme.android.kt: TONALSPOT and the green palette in the supplied
+// Grit reference. MaterialExpressiveTheme requires a newer Material3 than this app uses.
 package com.focus.prototype
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.*
@@ -25,8 +25,8 @@ import com.materialkolor.rememberDynamicColorScheme
 import androidx.compose.ui.platform.LocalContext
 @Composable fun GritTheme(content:@Composable ()->Unit) {
  val context=LocalContext.current
- // Grit's default Theme uses a fixed white seed with TONALSPOT, not the device wallpaper.
- val colorScheme=rememberDynamicColorScheme(seedColor=Color(0xFFFFFFFF),isDark=true,isAmoled=false,style=PaletteStyle.TonalSpot)
+ // Use the green Grit palette shown in the supplied task and analytics references.
+ val colorScheme=rememberDynamicColorScheme(seedColor=Color(0xFFA5D395),isDark=true,isAmoled=false,style=PaletteStyle.TonalSpot)
  androidx.compose.runtime.SideEffect { (context as? android.app.Activity)?.window?.useDarkSystemBars() }
  AppColors.apply(colorScheme)
  MaterialTheme(colorScheme=colorScheme,typography=provideTypography(),content=content)

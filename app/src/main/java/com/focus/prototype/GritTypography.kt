@@ -14,16 +14,17 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-// Adapted: Android resources and Figtree default; KMP previews/unused font choices removed.
+// Adapted from Grit ProvideTypography.kt; Android resource loading replaces Compose Multiplatform resources.
 package com.focus.prototype
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontVariation
+import androidx.compose.ui.text.ExperimentalTextApi
 val TYPOGRAPHY = Typography()
 /** function to get custom typography for Grit */
-@Composable
-fun provideTypography(font: Int = R.font.figtree): Typography {
+@Composable fun provideTypography(font: Int = R.font.poppins_regular): Typography {
     val selectedFont = FontFamily(Font(font))
 
     return Typography(
@@ -44,3 +45,27 @@ fun provideTypography(font: Int = R.font.figtree): Typography {
         labelSmall = TYPOGRAPHY.labelSmall.copy(fontFamily = selectedFont),
     )
 }
+
+/** Original Grit variable-font settings, retained for emphasized headings and rounded metrics. */
+@OptIn(ExperimentalTextApi::class)
+@Composable fun gritFontEmphasis(slant: Float = 0f): FontFamily = FontFamily(
+    Font(
+        R.font.google_sans_flex,
+        variationSettings = FontVariation.Settings(
+            FontVariation.weight(1000),
+            FontVariation.slant(slant),
+            FontVariation.width(120f),
+        ),
+    ),
+)
+
+@OptIn(ExperimentalTextApi::class)
+@Composable fun gritFontRounded(): FontFamily = FontFamily(
+    Font(
+        R.font.google_sans_flex,
+        variationSettings = FontVariation.Settings(
+            FontVariation.weight(700),
+            FontVariation.Setting("ROND", 100f),
+        ),
+    ),
+)
