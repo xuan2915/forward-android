@@ -177,7 +177,7 @@ private fun FocusDial(
 ) {
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize().padding(5.dp)) {
-            val stroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+            val stroke = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round)
             drawArc(AppColors.Raised, -90f, 360f, false, style = stroke)
             if (free) {
                 val second = (elapsed / 1000L % 60L).toFloat()

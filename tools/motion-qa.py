@@ -1,7 +1,7 @@
 """Dedicated emulator acceptance: real UI actions on labelled QA tasks; restores original DB."""
 import subprocess, pathlib, os, time, re, xml.etree.ElementTree as ET
 adb=pathlib.Path(os.environ['ANDROID_HOME'])/'platform-tools/adb.exe'
-out=pathlib.Path('artifacts/qa/grit-ui-0.6.2');out.mkdir(parents=True,exist_ok=True)
+out=pathlib.Path('artifacts/qa/grit-ui-0.6.3');out.mkdir(parents=True,exist_ok=True)
 started=time.monotonic()
 record_started=None
 marks=[]
@@ -34,7 +34,7 @@ def stop_recording(process):
  try:process.wait(timeout=15)
  except subprocess.TimeoutExpired:
   process.kill();process.wait(timeout=5)
- run('pull','/sdcard/grit-ui-0.6.2.mp4',str(out/'interaction-demo.mp4'))
+ run('pull','/sdcard/grit-ui-0.6.3.mp4',str(out/'interaction-demo.mp4'))
  return None
 def stage(name):
  result=run('shell','am','instrument','-w','-e','service-stage',name,'com.focus.prototype.test/com.focus.prototype.BusinessChecks');print(result,flush=True);assert 'PASS' in result
@@ -45,7 +45,7 @@ try:
  assert node('今日任务') is not None
  growth_nav=node('成长');assert growth_nav is not None
  record_started=time.monotonic()
- rec=subprocess.Popen([str(adb),'-s','emulator-5554','shell','screenrecord','--size','540x1200','--bit-rate','2000000','--time-limit','180','/sdcard/grit-ui-0.6.2.mp4'])
+ rec=subprocess.Popen([str(adb),'-s','emulator-5554','shell','screenrecord','--size','540x1200','--bit-rate','2000000','--time-limit','180','/sdcard/grit-ui-0.6.3.mp4'])
  time.sleep(2);mark('recording begins')
  shot('home')
  tap('模拟器验收 · 整理书桌',True);mark('task row expands');shot('task-expanded')
@@ -72,7 +72,7 @@ try:
  tap('专注');mark('focus page opened');tap('50 / 10');assert node('50:00') is not None
  tap('25 / 5');tap('开始专注');time.sleep(2);mark('focus timer running');shot('focus-running')
  tap('暂停');mark('focus timer paused');shot('focus-paused');mark('video recording ends');rec=stop_recording(rec);tap('继续');tap('休息一下');tap('暂停休息');tap('继续');tap('结束休息')
- tap('奖励');shot('rewards');tap('复盘');shot('review')
+ tap('奖励');time.sleep(1.0);shot('rewards');tap('复盘');assert any(n.get('text','').startswith('今日总结') for n in tree().iter('node'));time.sleep(1.0);shot('review')
  tap('今天');tap('模拟器验收 · 整理书桌',True);tap('撤销误完成',True);tap('确认撤销',True)
  tap('成长');time.sleep(1.5)
  assert any('等级 1' in n.get('text','') for n in tree().iter('node')),'revoke did not restore XP'
