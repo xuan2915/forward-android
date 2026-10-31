@@ -19,12 +19,10 @@ package com.focus.prototype
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -48,19 +46,19 @@ fun GritWeeklyHeatMap(today: LocalDate, history: Map<String, String>, onDateSele
         val firstMonday = thisMonday.minusDays(51L * 7)
         (0..51).map { week -> GritWeek((0..6).map { firstMonday.plusDays(week * 7L + it) }) }
     }
-    val startIndex = (weeks.size - 20).coerceAtLeast(0)
+    val startIndex = (weeks.size - 13).coerceAtLeast(0)
     val state = rememberLazyListState(initialFirstVisibleItemIndex = startIndex)
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(24.dp)) {
         Row(
-            Modifier.fillMaxWidth().padding(12.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 13.dp),
             verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            Column(Modifier.padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Column(Modifier.padding(top = 15.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("一", "二", "三", "四", "五", "六", "日").forEachIndexed { index, label ->
                     Text(
                         if (index % 2 == 0) label else "",
-                        Modifier.width(16.dp).height(13.dp),
+                        Modifier.width(17.dp).height(16.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -70,14 +68,14 @@ fun GritWeeklyHeatMap(today: LocalDate, history: Map<String, String>, onDateSele
             LazyRow(
                 state = state,
                 modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 items(weeks) { week ->
-                    Column(Modifier.width(14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Column(Modifier.width(18.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         val monthStart = week.dates.firstOrNull { it.dayOfMonth == 1 }
                         Text(
-                            monthStart?.monthValue?.toString().orEmpty(),
-                            Modifier.height(11.dp).fillMaxWidth(),
+                            monthStart?.let { "${it.monthValue}月" }.orEmpty(),
+                            Modifier.height(13.dp).fillMaxWidth(),
                             style = MaterialTheme.typography.labelSmall,
                             fontSize = 8.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -88,7 +86,6 @@ fun GritWeeklyHeatMap(today: LocalDate, history: Map<String, String>, onDateSele
                             val status = history[date.toString()]
                             val previous = history[date.minusDays(1).toString()] == "完成"
                             val next = history[date.plusDays(1).toString()] == "完成"
-                            val isComplete = status == "完成"
                             val position = when {
                                 previous && next -> StreakPosition.MIDDLE
                                 previous -> StreakPosition.END
@@ -102,8 +99,8 @@ fun GritWeeklyHeatMap(today: LocalDate, history: Map<String, String>, onDateSele
                                 else -> if (date <= today) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = .45f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = .14f)
                             }
                             Box(
-                            Modifier.size(14.dp)
-                                    .clip(gritHeatMapStreakShape(position, date.dayOfWeek.value == 1, date.dayOfWeek.value == 7))
+                            Modifier.size(16.dp)
+                                    .clip(if (position == StreakPosition.ISOLATED) RoundedCornerShape(5.dp) else gritHeatMapStreakShape(position, date.dayOfWeek.value == 1, date.dayOfWeek.value == 7))
                                     .background(color)
                                     .clickable { onDateSelected(date) },
                             )

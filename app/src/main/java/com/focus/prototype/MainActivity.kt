@@ -46,8 +46,7 @@ class MainActivity : ComponentActivity() {
  override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); receiveText(intent); shareVersion++; refresh++ }
  override fun onResume() { super.onResume(); refresh++ }
  override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState)
-  window.statusBarColor=android.graphics.Color.rgb(17,18,20);window.navigationBarColor=android.graphics.Color.rgb(17,18,20);window.decorView.systemUiVisibility=0
-  if(Build.VERSION.SDK_INT>=29){window.isNavigationBarContrastEnforced=false;window.isStatusBarContrastEnforced=false}
+  window.useDarkSystemBars()
   receiveText(intent)
   val db = Database(this); val store = Store(this)
   val focusTimer=FocusTimer(db);focusTimer.reconcileBoot()
@@ -55,14 +54,15 @@ class MainActivity : ComponentActivity() {
   val apps = packageManager.queryIntentActivities(launch,0).filter { store.canRestrict(it.activityInfo.packageName) }.distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(packageManager).toString() }
   setContent {
     var page by remember { mutableIntStateOf(if(db.setting("import_draft").isNotBlank()) 3 else 0) }; var editor by remember { mutableStateOf(false) };var dataVersion by remember {mutableIntStateOf(0)};var rewardHistoryExpanded by remember {mutableStateOf(false)};var taskFilter by remember { mutableIntStateOf(0) }
-   var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }
+    var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }
    LaunchedEffect(shareVersion) { if(shareVersion>0) { page=3;editor=false } }
    LaunchedEffect(Unit) { while(true) { db.settleToday();focusTimer.advance();if(now%10L==0L)db.checkpoint();now++; delay(1000) } }
    val tick = now + refresh; val today = db.day(); val c = remember(today,tick) { db.contract(today) }; val tasks = remember(today,tick) { db.tasks(today) }
    val protected = remember(tick) { val id = ComponentName(this,FocusService::class.java).flattenToString(); FocusService.connected && Settings.Secure.getString(contentResolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)?.split(':')?.any { it.equals(id,true) } == true }
    FocusTheme { MotionHost(db.xp(),showToast=page!=2) {
-    androidx.activity.compose.BackHandler(enabled=page==5 || editor) {if(editor)editor=false else page=0}
-    Scaffold(containerColor=AppColors.Background, bottomBar = { AppNavigation(page){page=it;editor=false} }) { pad ->
+      androidx.activity.compose.BackHandler(enabled=page==5 || editor) { if(editor) editor=false else page=0 }
+    Scaffold(containerColor=AppColors.Background, bottomBar = { if(taskDetailsId==null) AppNavigation(page){page=it;editor=false} }) { pad ->
+     Box(Modifier.fillMaxSize()) {
      AnimatedContent(targetState=page,transitionSpec={fadeIn(tween(AppMotion.Standard))+slideInHorizontally(tween(AppMotion.Standard)){it/28} togetherWith fadeOut(tween(AppMotion.Short))+slideOutHorizontally(tween(AppMotion.Short)){ -it/36 }},label="page-transition") { screen ->
      val listState=remember(screen){androidx.compose.foundation.lazy.LazyListState()}
      LazyColumn(state=listState,modifier=Modifier.fillMaxSize().padding(pad).padding(horizontal=AppSpace.Page), contentPadding=PaddingValues(top=AppSpace.XLarge,bottom=88.dp), verticalArrangement=Arrangement.spacedBy(AppSpace.Large)) {
@@ -79,7 +79,7 @@ class MainActivity : ComponentActivity() {
         if(!c.confirmed) item { ContractEditor(db, c) { refresh++ } }
         val continuing = db.runningTasks().filter { it.date != today }
         if(continuing.isNotEmpty()) item { Text("跨日专注 · 计入开始当天，过期奖励不补发",color=Color.LightGray) }
-         items(continuing,key={it.id}) { task -> TaskCard(task,db,focusTimer,onFocus={page=4},onChanged={refresh++}) }
+          items(continuing,key={it.id}) { task -> TaskCard(task,db,focusTimer,onFocus={page=4},onDetails={taskDetailsId=task.id},onChanged={refresh++}) }
          val sections=when(taskFilter) {
           1 -> listOf("必做任务" to required)
           2 -> listOf("选做任务" to optional)
@@ -88,7 +88,7 @@ class MainActivity : ComponentActivity() {
          sections.forEach { (title,itemsForSection) ->
           if(itemsForSection.isNotEmpty() || taskFilter!=0) {
            item(key="grit-section-$taskFilter-$title") { GritTaskSectionHeader(title,itemsForSection.count{it.done},itemsForSection.size){targetDay=today;editor=true} }
-           if(itemsForSection.isNotEmpty()) itemsIndexed(itemsForSection,key={_,task->task.id}) { index,task -> TaskCard(task,db,focusTimer,onFocus={page=4},onChanged={refresh++},index=index,count=itemsForSection.size) }
+            if(itemsForSection.isNotEmpty()) itemsIndexed(itemsForSection,key={_,task->task.id}) { index,task -> TaskCard(task,db,focusTimer,onFocus={page=4},onDetails={taskDetailsId=task.id},onChanged={refresh++},index=index,count=itemsForSection.size) }
           }
          }
          if(tasks.isEmpty()) item { GritEmptyTasks(if(c.rest) "今天是休息日。任务记录仍会保留在成长日历中。" else "还没有任务，添加一项今天要完成的事。") }
@@ -136,6 +136,13 @@ class MainActivity : ComponentActivity() {
       }
      }
     }
+     val detailTask = remember(taskDetailsId,tick) { taskDetailsId?.let(db::task) }
+      LaunchedEffect(taskDetailsId,detailTask) { if(taskDetailsId!=null && detailTask==null) taskDetailsId=null }
+     if(detailTask!=null) TaskDetailSheet(
+      task=detailTask, db=db, timer=focusTimer,
+      onDismiss={taskDetailsId=null}, onFocus={taskDetailsId=null;page=4}, onChanged={refresh++},
+      )
+     }
    }
   }
  }
@@ -147,7 +154,7 @@ class MainActivity : ComponentActivity() {
 @Composable private fun Header(label:String,title:String) { PageHeading(label,title) }
 @Composable private fun CardBlock(content:@Composable ColumnScope.()->Unit) { QuietSurface(Modifier.animateContentSize(animationSpec=motionSizeSpec()),content=content) }
 @Composable private fun NumberField(label:String,value:String,onValue:(String)->Unit) { OutlinedTextField(value,onValueChange={onValue(it.filter(Char::isDigit).take(4))},label={Text(label)},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),singleLine=true,modifier=Modifier.fillMaxWidth()) }
-private fun focusDuration(milliseconds:Long):String = when {
+internal fun focusDuration(milliseconds:Long):String = when {
  milliseconds < 60_000 -> "${milliseconds/1_000} 秒"
  milliseconds < 3_600_000 -> "${milliseconds/60_000} 分钟"
  else -> "${milliseconds/3_600_000} 小时 ${(milliseconds%3_600_000)/60_000} 分"
@@ -175,40 +182,17 @@ private fun focusDuration(milliseconds:Long):String = when {
  }
 }
 
-@Composable private fun TaskCard(task:Task,db:Database,timer:FocusTimer,onFocus:()->Unit,onChanged:()->Unit,index:Int=0,count:Int=1) {
- val haptic=androidx.compose.ui.platform.LocalHapticFeedback.current
- var expanded by remember(task.id){mutableStateOf(false)}
- var resetting by remember(task.id){mutableStateOf(false)}
- var checking by remember(task.id) { mutableStateOf(false) }; var selfCheck by remember(task.id) { mutableStateOf(false) }; var revoking by remember(task.id) { mutableStateOf(false) }
+@Composable private fun TaskCard(task:Task,db:Database,timer:FocusTimer,onFocus:()->Unit,onDetails:()->Unit,onChanged:()->Unit,index:Int=0,count:Int=1) {
  val active=timer.taskId==task.id && timer.phase=="work"
- Column(Modifier.fillMaxWidth().animateContentSize(animationSpec=motionSizeSpec())) {
-  GritTaskHeader(task,focusDuration(db.elapsed(task)),active,expanded,gritTaskShape(index,count,expanded),{expanded=!expanded}) {
+ GritTaskHeader(task,focusDuration(db.elapsed(task)),active,false,gritTaskShape(index,count),onDetails) {
    when {
     timer.taskId==task.id && timer.phase=="work" -> timer.pause()
-    timer.taskId==task.id && timer.phase=="paused" -> timer.resume(task)
+     timer.taskId==task.id && timer.phase=="paused" -> { timer.resume(task); onFocus() }
     else -> { if(timer.phase!="ready")timer.finish();timer.begin(task);onFocus() }
    }
    onChanged()
-  }
-  androidx.compose.animation.AnimatedVisibility(expanded,enter=androidx.compose.animation.expandVertically(tween(motionMillis(),easing=AppMotion.Ease))+fadeIn(tween(motionMillis())),exit=androidx.compose.animation.shrinkVertically(tween(motionMillis(),easing=AppMotion.Ease))+fadeOut(tween(motionMillis()))) {
-   Surface(shape=RoundedCornerShape(bottomStart=26.dp,bottomEnd=26.dp),color=MaterialTheme.colorScheme.surfaceContainer) { Column(Modifier.fillMaxWidth().padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
-   Text("${if(task.minutes>0) "${focusDuration(db.elapsed(task))} / 目标 ${task.minutes} 分钟" else "专注 ${focusDuration(db.elapsed(task))}"}   ·   ${if(task.done) "已完成" else if(task.runningSince>0) "计时中" else "未开始"}",color=AppColors.Muted)
-  if(task.checklist.isNotBlank()) Text("完成标准：${task.checklist}",color=AppColors.Muted)
-  ProofActions(task,db,onChanged)
-  if(task.done && !task.required && !task.claimed){Text("领取奖励 · 选择一项",fontSize=14.sp);Row{if(task.rewardMinutes>0)TextButton(enabled=db.eligible(),onClick={db.claim(task,"video");onChanged()}){Text("${task.rewardMinutes} 视频分钟")};if(task.rewardGames>0)TextButton(enabled=db.eligible(),onClick={db.claim(task,"game");onChanged()}){Text("${task.rewardGames} 游戏局数")}};if(!db.eligible())Text("完成全部必做后可领取",fontSize=12.sp,color=Color.Gray)}
-  if(task.claimed)Text("奖励已领取",fontSize=12.sp,color=Color.Gray)
-  if(task.done) { TextButton(onClick={revoking=true}) {Text("撤销误完成")}; if(revoking) { Text("撤销后将按可用余额冲正已领取奖励；已消费的额度无法追回。",color=Color.LightGray); Row { Button(onClick={db.revoke(task);revoking=false;onChanged()}) {Text("确认撤销")}; TextButton(onClick={revoking=false}) {Text("取消")} } } }
-  if(!task.done) { TaskChanges(task,db,onChanged)
-   Row(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) { if(task.runningSince>0) SecondaryAction("暂停",{if(timer.taskId==task.id && timer.phase=="work")timer.pause() else db.pause(task);onChanged()}) else PrimaryAction(if(timer.phase=="paused"&&timer.taskId==task.id) "继续专注" else "开始专注",{if(timer.phase=="paused"&&timer.taskId==task.id)timer.resume(task) else {if(timer.phase!="ready")timer.finish();timer.begin(task);onFocus()};onChanged()}) }
-   if(db.elapsed(task)>0)TextButton(onClick={resetting=true}){Text("重新计时")}
-   TextButton(onClick={checking=!checking}) {Text("确认完成")}
-   if(checking) { Row(Modifier.toggleable(value=selfCheck,onValueChange={selfCheck=it}),verticalAlignment=Alignment.CenterVertically) { Checkbox(selfCheck,onCheckedChange=null); Text("我已按预设条件完成${if(task.mode=="掌握型") "独立练习或解释" else ""}") }; val allowed = selfCheck && db.elapsed(task)>=task.minutes*60000L && (task.mode=="行动型" || task.evidence.isNotBlank()); Button(enabled=allowed,onClick={db.complete(task);haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress);db.grantBase(task.date);checking=false;onChanged()}) {Text("完成任务")}; Text("请如实自检，照片和附件仅保存在本机。",fontSize=12.sp,color=Color.Gray) }
-
-  }
-  } } }
  }
- if(resetting)AlertDialog(onDismissRequest={resetting=false},title={Text("重新开始这次专注？")},text={Text("这项任务已计入的专注时长将清零，完成证明会保留。")},confirmButton={TextButton(onClick={db.restart(task);resetting=false;onChanged()}){Text("清零计时")}},dismissButton={TextButton(onClick={resetting=false}){Text("取消")}})
-}
+ }
 
 @Composable private fun ReviewEditor(db:Database,day:String,version:Int,onSaved:()->Unit) {
  val saved = remember(day,version) { db.readReview(day) }; var problem by remember(day,version) { mutableStateOf(saved[0]) }; var praise by remember(day,version) { mutableStateOf(saved[1]) }; var note by remember(day,version) { mutableStateOf(saved[2]) }

@@ -1,13 +1,18 @@
-// CalendarMap layout adapted from Grit, Copyright (C) 2026 Shubham Gorai, GPL-3.0-or-later.
 package com.focus.prototype
 
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -38,12 +43,14 @@ import java.time.YearMonth
 import kotlinx.coroutines.launch
 
 private data class DayStats(val date: LocalDate, val completed: Int, val total: Int, val focusMinutes: Long)
+private enum class GrowthSection(val label: String) { CALENDAR("日历"), TREND("趋势"), MILESTONES("里程碑") }
 
 @Composable
 fun GrowthDetails(db: Database) {
     val today = LocalDate.parse(db.day())
     val history = db.history().toMap()
     var selectedDate by remember(today) { mutableStateOf(today) }
+    var section by remember { mutableStateOf(GrowthSection.CALENDAR) }
     val calendarState = rememberCalendarState(
         startMonth = YearMonth.of(2019, 1),
         endMonth = YearMonth.from(today.plusYears(2)),
@@ -52,18 +59,64 @@ fun GrowthDetails(db: Database) {
     )
     val scope = rememberCoroutineScope()
     LaunchedEffect(selectedDate) {
-        val targetMonth = YearMonth.from(selectedDate)
-        if (targetMonth != calendarState.firstVisibleMonth.yearMonth) calendarState.animateScrollToMonth(targetMonth)
+        val month = YearMonth.from(selectedDate)
+        if (month != calendarState.firstVisibleMonth.yearMonth) calendarState.animateScrollToMonth(month)
     }
+
+    GritAnalyticsHeader("过去一年", icon = R.drawable.grit_heat)
+    GritWeeklyHeatMap(today, history) { selectedDate = it; section = GrowthSection.CALENDAR }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        CalendarLegend(AppColors.Accent, "完成")
+        CalendarLegend(AppColors.Border, "休息")
+        CalendarLegend(AppColors.Warning.copy(alpha = .75f), "未完成")
+    }
+
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        GrowthSection.entries.forEach { item ->
+            FilterChip(
+                selected = section == item,
+                onClick = { section = item },
+                label = { Text(item.label) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+
+    val transitionDuration = motionMillis(AppMotion.Short)
+    AnimatedContent(
+        targetState = section,
+        transitionSpec = { fadeIn(tween(transitionDuration)) togetherWith fadeOut(tween(transitionDuration)) },
+        label = "growth-section",
+    ) { visibleSection ->
+        when (visibleSection) {
+            GrowthSection.CALENDAR -> CalendarSection(db, today, history, selectedDate, calendarState, scope) { selectedDate = it }
+            GrowthSection.TREND -> TrendSection(db, today)
+            GrowthSection.MILESTONES -> MilestoneSection(db)
+        }
+    }
+}
+
+@Composable
+private fun CalendarSection(
+    db: Database,
+    today: LocalDate,
+    history: Map<String, String>,
+    selectedDate: LocalDate,
+    calendarState: com.kizitonwose.calendar.compose.CalendarState,
+    scope: kotlinx.coroutines.CoroutineScope,
+    onDateSelected: (LocalDate) -> Unit,
+) {
     val visibleMonth = calendarState.firstVisibleMonth.yearMonth
     val monthDays = (1..visibleMonth.lengthOfMonth()).map { visibleMonth.atDay(it) }
     val completed = monthDays.count { history[it.toString()] == "完成" }
     val rested = monthDays.count { history[it.toString()] == "休息" }
     val missed = monthDays.count { history[it.toString()] == "未完成" }
-    val stats = (6 downTo 0).map { offset -> dailyStats(db, today.minusDays(offset.toLong())) }
-
-    GritAnalyticsHeader("过去一年", icon = R.drawable.grit_heat)
-    GritWeeklyHeatMap(today, history) { selectedDate = it }
 
     GritAnalyticsHeader("成长日历", icon = R.drawable.grit_calendar)
     QuietSurface {
@@ -72,32 +125,32 @@ fun GrowthDetails(db: Database) {
             Text("${visibleMonth.year} 年 ${visibleMonth.monthValue} 月", style = MaterialTheme.typography.titleMedium)
             TextButton(onClick = { scope.launch { calendarState.animateScrollToMonth(visibleMonth.plusMonths(1)) } }) { Text("›", color = AppColors.Muted, fontSize = 24.sp) }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(68.dp), contentAlignment = Alignment.Center) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Box(Modifier.size(58.dp), contentAlignment = Alignment.Center) {
                 androidx.compose.foundation.Canvas(Modifier.fillMaxSize().padding(4.dp)) {
                     val total = visibleMonth.lengthOfMonth().toFloat()
                     var start = -90f
-                    listOf(completed to AppColors.Accent, rested to AppColors.Border, missed to AppColors.Warning).forEach { (count, color) ->
+                    listOf(completed to AppColors.Accent, rested to AppColors.Border, missed to AppColors.Warning.copy(alpha = .8f)).forEach { (count, color) ->
                         if (count > 0) {
                             val sweep = 360f * count / total
-                            drawArc(color, start, sweep, false, style = Stroke(4.dp.toPx()))
+                            drawArc(color, start, sweep, false, style = Stroke(5.dp.toPx()))
                             start += sweep
                         }
                     }
-                    if (completed + rested + missed == 0) drawArc(AppColors.Raised, -90f, 360f, false, style = Stroke(4.dp.toPx()))
+                    if (completed + rested + missed == 0) drawArc(AppColors.Raised, -90f, 360f, false, style = Stroke(5.dp.toPx()))
                 }
-                Text(completed.toString(), fontSize = 22.sp, fontWeight = FontWeight.Light)
+                Text(completed.toString(), fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text("本月记录", style = MaterialTheme.typography.labelMedium, color = AppColors.Muted)
-                Text("完成 $completed 天   休息 $rested 天", style = MaterialTheme.typography.bodySmall, color = AppColors.Text)
-                Text("未完成 $missed 天", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("本月完成", style = MaterialTheme.typography.labelMedium, color = AppColors.Muted)
+                Text("$completed 天完成 · $rested 天休息", style = MaterialTheme.typography.bodySmall)
+                Text("$missed 天未完成", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
             }
         }
         HorizontalCalendar(
-            modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer,MaterialTheme.shapes.medium).animateContentSize(animationSpec=motionSizeSpec()),
+            modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.shapes.medium),
             state = calendarState,
-            dayContent = { day -> GritCalendarDay(day, today, selectedDate, history) { selectedDate = it } },
+            dayContent = { day -> GritCalendarDay(day, today, selectedDate, history) { onDateSelected(it) } },
             monthHeader = {
                 Row(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
                     listOf("一", "二", "三", "四", "五", "六", "日").forEach {
@@ -106,35 +159,43 @@ fun GrowthDetails(db: Database) {
                 }
             },
         )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            CalendarLegend(AppColors.Accent, "完成")
-            CalendarLegend(AppColors.Border, "休息")
-            CalendarLegend(AppColors.Warning.copy(alpha = .75f), "未完成")
-        }
     }
 
     val selectedState = history[selectedDate.toString()]
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-        Text("${selectedDate.monthValue}月${selectedDate.dayOfMonth}日", style = MaterialTheme.typography.titleMedium)
+    GritAnalyticsHeader("${selectedDate.monthValue}月${selectedDate.dayOfMonth}日", icon = R.drawable.grit_analytics) {
         StatusPill(selectedState ?: "未记录", active = selectedState == "完成")
     }
-    val selectedTasks = if (selectedState != null) db.tasks(selectedDate.toString()) else emptyList()
-    selectedTasks.forEach { task ->
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(if (task.done) "✓" else "·", color = if (task.done) AppColors.Accent else AppColors.Muted, fontSize = 18.sp)
-            Text(task.title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = AppColors.Text)
-            Text(if (task.done) "已完成" else "未完成", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
+    QuietSurface {
+        val selectedTasks = if (selectedState != null) db.tasks(selectedDate.toString()) else emptyList()
+        if (selectedTasks.isEmpty()) Text("这一天还没有任务记录。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+        selectedTasks.forEachIndexed { index, task ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CompletionMark(task.done)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(task.title, style = MaterialTheme.typography.bodyMedium, color = AppColors.Text, maxLines = 1)
+                    Text(if (task.minutes > 0) "${focusDuration(db.elapsed(task))} / 目标 ${task.minutes} 分钟" else "专注 ${focusDuration(db.elapsed(task))}", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
+                }
+                Text(if (task.done) "完成" else "未完成", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
+            }
+            if (index < selectedTasks.lastIndex) Hairline()
+        }
+        val review = if (selectedState != null) db.readReview(selectedDate.toString()).filter { it.isNotBlank() } else emptyList()
+        if (review.isNotEmpty()) {
+            Hairline()
+            Text("当日总结", style = MaterialTheme.typography.labelLarge, color = AppColors.Muted)
+            review.forEach { Text(it, style = MaterialTheme.typography.bodyMedium, color = AppColors.Text) }
         }
     }
-    if (selectedState == null) Text("这一天还没有任务记录。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-    val review = if (selectedState != null) db.readReview(selectedDate.toString()).filter { it.isNotBlank() } else emptyList()
-    if (review.isNotEmpty()) Text(review.joinToString("\n"), style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+}
 
+@Composable
+private fun TrendSection(db: Database, today: LocalDate) {
+    val stats = (6 downTo 0).map { offset -> dailyStats(db, today.minusDays(offset.toLong())) }
+    val total = stats.sumOf { it.total }
+    val done = stats.sumOf { it.completed }
+    val focusMinutes = stats.sumOf { it.focusMinutes }
     GritAnalyticsHeader("近 7 天", icon = R.drawable.grit_analytics)
     QuietSurface {
-        val total = stats.sumOf { it.total }
-        val done = stats.sumOf { it.completed }
-        val focusMinutes = stats.sumOf { it.focusMinutes }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("$done / $total", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Light)
@@ -152,7 +213,7 @@ fun GrowthDetails(db: Database) {
                 Chart(
                     chart = lineChart(lines = listOf(lineSpec(lineColor = AppColors.Accent, lineThickness = 2.5.dp, lineBackgroundShader = null))),
                     chartModelProducer = producer,
-                    modifier = Modifier.fillMaxWidth().height(142.dp),
+                    modifier = Modifier.fillMaxWidth().height(154.dp),
                     runInitialAnimation = false,
                     isZoomEnabled = false,
                 )
@@ -160,58 +221,73 @@ fun GrowthDetails(db: Database) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 stats.forEach { Text("${it.date.dayOfMonth}", style = MaterialTheme.typography.labelSmall, color = AppColors.Quiet) }
             }
-        } else {
-            Text("完成任务后，这里会显示真实的每日完成趋势。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-        }
+        } else Text("完成任务后，这里会显示真实的每日完成趋势。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
     }
 
     GritAnalyticsHeader("近 30 天", icon = R.drawable.grit_chart)
     val monthStats = taskStats(db, today.minusDays(29), today)
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text("${percent(monthStats.completed, monthStats.total)}%", style = MaterialTheme.typography.titleLarge)
-            Text("任务完成率", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-        }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(formatMinutes(monthStats.focusMinutes), style = MaterialTheme.typography.titleLarge)
-            Text("有效专注时长", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+    QuietSurface {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("${percent(monthStats.completed, monthStats.total)}%", style = MaterialTheme.typography.headlineSmall)
+                Text("任务完成率", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(formatMinutes(monthStats.focusMinutes), style = MaterialTheme.typography.titleLarge)
+                Text("有效专注时长", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+            }
         }
     }
+}
 
+@Composable
+private fun MilestoneSection(db: Database) {
     val lifetime = db.readableDatabase.rawQuery("SELECT COALESCE(SUM(done),0),COALESCE(SUM(elapsed),0) FROM tasks", null).use { cursor ->
         cursor.moveToFirst(); cursor.getInt(0) to cursor.getLong(1)
     }
     val bestStreak = db.bestStreak()
     val milestones = listOf(
-        Triple("迈出第一步", "完成任务 ${lifetime.first.coerceAtMost(1)} / 1 项", lifetime.first >= 1),
-        Triple("十次坚持", "完成任务 ${lifetime.first.coerceAtMost(10)} / 10 项", lifetime.first >= 10),
-        Triple("一周节奏", "最长连续 $bestStreak / 7 天", bestStreak >= 7),
-        Triple("专注十小时", "累计专注 ${(lifetime.second / 60000).coerceAtMost(600)} / 600 分钟", lifetime.second >= 600 * 60000L),
+        Triple("迈出第一步", lifetime.first.coerceAtMost(1), 1),
+        Triple("十次坚持", lifetime.first.coerceAtMost(10), 10),
+        Triple("一周节奏", bestStreak.coerceAtMost(7), 7),
+        Triple("专注十小时", (lifetime.second / 60000).toInt().coerceAtMost(600), 600),
     )
-    var expanded by remember { mutableStateOf(false) }
-    GritAnalyticsHeader("成长里程碑", icon = R.drawable.grit_flag) { TextButton(onClick={expanded=!expanded}) { Text(if(expanded) "收起" else "展开") } }
-    androidx.compose.animation.AnimatedVisibility(expanded,enter=androidx.compose.animation.expandVertically(androidx.compose.animation.core.tween(motionMillis())),exit=androidx.compose.animation.shrinkVertically(androidx.compose.animation.core.tween(motionMillis()))) { Column {
-    Text("每一步都来自真实的任务与专注记录。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-    milestones.forEachIndexed { index, (title, detail, earned) ->
-        Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall, color = AppColors.Text)
-                Text(detail, style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+    GritAnalyticsHeader("成长里程碑", icon = R.drawable.grit_flag)
+    QuietSurface {
+        Text("每一步都来自真实的任务与专注记录。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+        milestones.forEachIndexed { index, (title, value, target) ->
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = AppColors.Text)
+                    Text("$value / $target", style = MaterialTheme.typography.labelMedium, color = AppColors.Muted)
+                }
+                androidx.compose.material3.LinearProgressIndicator(
+                    progress = { value.toFloat() / target }, modifier = Modifier.fillMaxWidth().height(5.dp),
+                    color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                )
             }
-            StatusPill(if (earned) "已达成" else "进行中", active = earned)
+            if (index < milestones.lastIndex) Hairline()
         }
-        if (index < milestones.lastIndex) Hairline()
     }
 
-    } }
-    GritAnalyticsHeader("计划与例外记录", icon = R.drawable.grit_calendar)
-    val audits = db.readableDatabase.rawQuery("SELECT day,detail FROM audit ORDER BY created DESC LIMIT 12", null)
-    audits.use { cursor ->
-        if (!cursor.moveToFirst()) Text("计划变更与紧急解锁会显示在这里。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-        else do {
-            val day = LocalDate.parse(cursor.getString(0))
-            Text("${day.monthValue}月${day.dayOfMonth}日  ·  ${cursor.getString(1)}", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-        } while (cursor.moveToNext())
+    GritAnalyticsHeader("计划与例外", icon = R.drawable.grit_calendar)
+    QuietSurface {
+        val audits = db.readableDatabase.rawQuery("SELECT day,detail FROM audit ORDER BY created DESC LIMIT 12", null)
+        audits.use { cursor ->
+            if (!cursor.moveToFirst()) Text("计划变更与紧急解锁会显示在这里。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+            else do {
+                val day = LocalDate.parse(cursor.getString(0))
+                Text("${day.monthValue}月${day.dayOfMonth}日  ·  ${cursor.getString(1)}", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+            } while (cursor.moveToNext())
+        }
+    }
+}
+
+@Composable
+private fun CalendarLegend(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(color))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
     }
 }
 
@@ -241,14 +317,6 @@ private fun CalendarCell(day: CalendarDay, today: LocalDate, selected: LocalDate
                 else -> AppColors.Text
             },
         )
-    }
-}
-
-@Composable
-private fun CalendarLegend(color: Color, label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-        Box(Modifier.size(7.dp).clip(CircleShape).background(color))
-        Text(label, style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
     }
 }
 

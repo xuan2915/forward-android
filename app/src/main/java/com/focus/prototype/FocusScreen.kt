@@ -15,11 +15,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.animation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.Composable
@@ -30,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -74,27 +73,27 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
         Spacer(Modifier.height(AppSpace.Medium))
 
         if (phase == "ready") {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FocusMode.entries.forEach { item ->
-                    FilterChip(
-                        selected = item == mode,
-                        onClick = { timer.selectMode(item); onChanged() },
-                        label = { Text(item.title) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            containerColor = AppColors.Surface,
-                            labelColor = AppColors.Muted,
-                            selectedContainerColor = AppColors.AccentWash,
-                            selectedLabelColor = AppColors.Accent,
-                        ),
-                        modifier = Modifier.weight(1f),
-                    )
+            Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+                Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FocusMode.entries.forEach { item ->
+                        val selectedMode = item == mode
+                        Surface(
+                            onClick = { timer.selectMode(item); onChanged() },
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                            color = if (selectedMode) MaterialTheme.colorScheme.primary else Color.Transparent,
+                            contentColor = if (selectedMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f).height(42.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) { Text(item.title, style = MaterialTheme.typography.labelLarge) }
+                        }
+                    }
                 }
             }
         }
 
         Spacer(Modifier.height(14.dp))
         FocusDial(
-            Modifier.size(232.dp),
+            Modifier.size(252.dp),
             animatedFraction,
             timer.elapsed(),
             freeMode,
@@ -117,9 +116,20 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
         )
         Spacer(Modifier.height(4.dp))
         if (selected != null) {
-            Box {
-                TextButton(enabled = phase == "ready", onClick = { chooseTask = true }) {
-                    Text(selected.title + if (selected.minutes > 0) " · ${selected.minutes} 分钟目标" else "", color = AppColors.Muted)
+            Box(Modifier.fillMaxWidth()) {
+                Surface(
+                    onClick = { chooseTask = true },
+                    enabled = phase == "ready",
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("当前任务", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
+                            Text(selected.title, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                        }
+                        if (phase == "ready") Text("更换", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    }
                 }
                 DropdownMenu(expanded = chooseTask, onDismissRequest = { chooseTask = false }) {
                     tasks.filter { !it.done }.forEach { task ->
@@ -177,7 +187,7 @@ private fun FocusDial(
 ) {
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize().padding(5.dp)) {
-            val stroke = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round)
+            val stroke = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Round)
             drawArc(AppColors.Raised, -90f, 360f, false, style = stroke)
             if (free) {
                 val second = (elapsed / 1000L % 60L).toFloat()

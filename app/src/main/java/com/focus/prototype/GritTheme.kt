@@ -27,7 +27,7 @@ import androidx.compose.ui.platform.LocalContext
  val context=LocalContext.current
  // Grit's default Theme uses a fixed white seed with TONALSPOT, not the device wallpaper.
  val colorScheme=rememberDynamicColorScheme(seedColor=Color(0xFFFFFFFF),isDark=true,isAmoled=false,style=PaletteStyle.TonalSpot)
- androidx.compose.runtime.SideEffect { (context as? android.app.Activity)?.window?.let { it.statusBarColor=android.graphics.Color.rgb(17,17,17);it.navigationBarColor=android.graphics.Color.rgb(17,17,17) } }
+ androidx.compose.runtime.SideEffect { (context as? android.app.Activity)?.window?.useDarkSystemBars() }
  AppColors.apply(colorScheme)
  MaterialTheme(colorScheme=colorScheme,typography=provideTypography(),content=content)
 }

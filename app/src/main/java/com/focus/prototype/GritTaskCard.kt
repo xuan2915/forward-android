@@ -41,18 +41,13 @@ fun GritTaskHeader(
     onFocusToggle: () -> Unit,
 ) {
     val cardContent by animateColorAsState(
-        when {
-            task.done -> MaterialTheme.colorScheme.onSurface
-            task.required -> MaterialTheme.colorScheme.onSecondaryContainer
-            else -> MaterialTheme.colorScheme.onTertiaryContainer
-        },
+        MaterialTheme.colorScheme.onSurface,
         tween(motionMillis()), label = "grit-content",
     )
     val cardContainer by animateColorAsState(
         when {
-            task.done -> MaterialTheme.colorScheme.surfaceContainerHighest
-            task.required -> MaterialTheme.colorScheme.secondaryContainer
-            else -> MaterialTheme.colorScheme.tertiaryContainer
+            active -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = .48f)
+            else -> MaterialTheme.colorScheme.surfaceContainerHigh
         },
         tween(motionMillis()), label = "grit-card",
     )
@@ -63,33 +58,33 @@ fun GritTaskHeader(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 70.dp).padding(horizontal = 15.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
         ) {
             CompletionMark(task.done)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     task.title,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     textDecoration = if (task.done) TextDecoration.LineThrough else TextDecoration.None,
                     maxLines = 1,
                 )
                 Text(
-                    "${if (task.required) "必做" else "选做"}  ·  ${if (task.minutes > 0) "目标 ${task.minutes} 分钟" else "自由专注"}  ·  $elapsed",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = cardContent.copy(alpha = .78f),
+                    "${if (task.required) "必做" else "选做"}  ·  ${if (task.minutes > 0) "${task.minutes}分钟" else "自由专注"}  ·  $elapsed",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                 )
             }
             if (!task.done) {
                 Surface(
                     onClick = onFocusToggle,
-                    shape = RoundedCornerShape(if (expanded) 16.dp else 20.dp),
+                    shape = RoundedCornerShape(17.dp),
                     color = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(48.dp),
+                    modifier = Modifier.size(42.dp),
                 ) {
-                    Box(contentAlignment = Alignment.Center) { PlayPauseMorph(if (active) 1f else 0f, 48) }
+                    Box(contentAlignment = Alignment.Center) { PlayPauseMorph(if (active) 1f else 0f, 42) }
                 }
             }
         }
