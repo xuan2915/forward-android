@@ -20,11 +20,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.*
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
-@Composable fun GritAnalyticsHeader(title:String,header:(@Composable RowScope.()->Unit)={}) {
+import androidx.compose.ui.res.painterResource
+@Composable fun GritAnalyticsHeader(title:String,icon:Int?=null,header:(@Composable RowScope.()->Unit)={}) {
  Row(Modifier.fillMaxWidth().padding(start=16.dp,end=8.dp,top=8.dp,bottom=8.dp).heightIn(min=40.dp),verticalAlignment=Alignment.CenterVertically) {
-  Text(title,fontSize=20.sp,maxLines=1,overflow=TextOverflow.Ellipsis,color=MaterialTheme.colorScheme.onSurface,modifier=Modifier.weight(1f))
+  if(icon!=null) { Icon(painterResource(icon),null,tint=MaterialTheme.colorScheme.onSurface,modifier=Modifier.size(22.dp)); Spacer(Modifier.width(8.dp)) }
+  Text(title,fontSize=20.sp,fontWeight=FontWeight.SemiBold,maxLines=1,overflow=TextOverflow.Ellipsis,color=MaterialTheme.colorScheme.onSurface,modifier=Modifier.weight(1f))
   header()
  }
 }

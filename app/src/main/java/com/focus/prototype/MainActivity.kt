@@ -22,6 +22,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -53,7 +54,7 @@ class MainActivity : ComponentActivity() {
   val launch = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
   val apps = packageManager.queryIntentActivities(launch,0).filter { store.canRestrict(it.activityInfo.packageName) }.distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(packageManager).toString() }
   setContent {
-   var page by remember { mutableIntStateOf(if(db.setting("import_draft").isNotBlank()) 3 else 0) }; var editor by remember { mutableStateOf(false) };var dataVersion by remember {mutableIntStateOf(0)};var rewardHistoryExpanded by remember {mutableStateOf(false)}
+    var page by remember { mutableIntStateOf(if(db.setting("import_draft").isNotBlank()) 3 else 0) }; var editor by remember { mutableStateOf(false) };var dataVersion by remember {mutableIntStateOf(0)};var rewardHistoryExpanded by remember {mutableStateOf(false)};var taskFilter by remember { mutableIntStateOf(0) }
    var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }
    LaunchedEffect(shareVersion) { if(shareVersion>0) { page=3;editor=false } }
    LaunchedEffect(Unit) { while(true) { db.settleToday();focusTimer.advance();if(now%10L==0L)db.checkpoint();now++; delay(1000) } }
@@ -63,25 +64,34 @@ class MainActivity : ComponentActivity() {
     androidx.activity.compose.BackHandler(enabled=page==5 || editor) {if(editor)editor=false else page=0}
     Scaffold(containerColor=AppColors.Background, bottomBar = { AppNavigation(page){page=it;editor=false} }) { pad ->
      AnimatedContent(targetState=page,transitionSpec={fadeIn(tween(AppMotion.Standard))+slideInHorizontally(tween(AppMotion.Standard)){it/28} togetherWith fadeOut(tween(AppMotion.Short))+slideOutHorizontally(tween(AppMotion.Short)){ -it/36 }},label="page-transition") { screen ->
-     LazyColumn(Modifier.fillMaxSize().padding(pad).padding(horizontal=AppSpace.Page), contentPadding=PaddingValues(top=AppSpace.XLarge,bottom=88.dp), verticalArrangement=Arrangement.spacedBy(AppSpace.Large)) {
+     val listState=remember(screen){androidx.compose.foundation.lazy.LazyListState()}
+     LazyColumn(state=listState,modifier=Modifier.fillMaxSize().padding(pad).padding(horizontal=AppSpace.Page), contentPadding=PaddingValues(top=AppSpace.XLarge,bottom=88.dp), verticalArrangement=Arrangement.spacedBy(AppSpace.Large)) {
       if(editor) {
        item { TaskEditor(targetDay, db, onCancel={ editor=false }, onSave={ editor=false; refresh++ }) }
       } else when(screen) {
        0 -> {
-        item { Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically){Header(LocalDate.parse(today).format(DateTimeFormatter.ofPattern("M月d日 · E",Locale.CHINA)), "今日任务");TextButton(onClick={page=5}){Text("设置",color=AppColors.Muted)}}; if(db.setting("changed_$today")=="true") Text("今天的计划有调整 · 查看成长记录",color=AppColors.Muted) }; item { ProgressView(tasks.count{it.required && it.done},tasks.count{it.required});GrowthFeedback() }
-        item { CardBlock {
-         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) { Text("必做 ${tasks.count{it.required && it.done}} / ${tasks.count{it.required}}",style=MaterialTheme.typography.titleMedium);Text("选做 ${tasks.count{!it.required && it.done}} / ${tasks.count{!it.required}}",color=AppColors.Muted) }
-         Text(if(c.emergency) "今天已紧急解锁" else if(!db.eligible()) "完成必做后解锁娱乐" else "娱乐时间 · ${db.balance("video")/60000} 分钟",color=AppColors.Accent,style=MaterialTheme.typography.bodyMedium)
-        } }
-        if(db.setting("gate_changed_$today")=="true") item {Text("今天删减过必做任务，娱乐保持锁定。需要时可以紧急解锁，原因会留在记录中。",color=AppColors.Warning)}
-        if(!protected) item { TextButton(onClick={startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))}) { Text("应用保护未开启 · 前往授权",color=AppColors.Warning) } }
-        item { Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) { Text("今日任务",fontSize=22.sp,fontWeight=FontWeight.Bold); TextButton(onClick={targetDay=today; editor=true}) { Text("＋ 添加任务") } } }
+         val required=tasks.filter { it.required }; val optional=tasks.filterNot { it.required }
+         item { GritTodayHeader(LocalDate.parse(today).format(DateTimeFormatter.ofPattern("M月d日 · E",Locale.CHINA)),tasks.count{it.done},tasks.size){page=5} }
+         item { GritTaskFilters(taskFilter){taskFilter=it} }
+         item { GritEntertainmentBanner(protected,c.emergency,db.eligible(),db.balance("video")){if(!protected)startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) else page=1} }
+         if(db.setting("changed_$today")=="true") item {Text("今天的计划有调整 · 查看成长记录",color=AppColors.Muted)}
+         if(db.setting("gate_changed_$today")=="true") item {Text("今天修改过必做任务，娱乐保持锁定。变更已记录。",color=AppColors.Warning)}
         if(!c.confirmed) item { ContractEditor(db, c) { refresh++ } }
         val continuing = db.runningTasks().filter { it.date != today }
         if(continuing.isNotEmpty()) item { Text("跨日专注 · 计入开始当天，过期奖励不补发",color=Color.LightGray) }
-        items(continuing,key={it.id}) { task -> TaskCard(task,db,focusTimer,onFocus={page=4},onChanged={refresh++}) }
-        if(tasks.isEmpty()) item { Text("还没有任务。添加任务，或确认计划休息日。",color=Color.LightGray) }
-        items(tasks,key={it.id}) { task -> TaskCard(task,db,focusTimer,onFocus={page=4},onChanged={refresh++}) }
+         items(continuing,key={it.id}) { task -> TaskCard(task,db,focusTimer,onFocus={page=4},onChanged={refresh++}) }
+         val sections=when(taskFilter) {
+          1 -> listOf("必做任务" to required)
+          2 -> listOf("选做任务" to optional)
+          else -> listOf("必做任务" to required,"选做任务" to optional)
+         }
+         sections.forEach { (title,itemsForSection) ->
+          if(itemsForSection.isNotEmpty() || taskFilter!=0) {
+           item(key="grit-section-$taskFilter-$title") { GritTaskSectionHeader(title,itemsForSection.count{it.done},itemsForSection.size){targetDay=today;editor=true} }
+           if(itemsForSection.isNotEmpty()) itemsIndexed(itemsForSection,key={_,task->task.id}) { index,task -> TaskCard(task,db,focusTimer,onFocus={page=4},onChanged={refresh++},index=index,count=itemsForSection.size) }
+          }
+         }
+         if(tasks.isEmpty()) item { GritEmptyTasks(if(c.rest) "今天是休息日。任务记录仍会保留在成长日历中。" else "还没有任务，添加一项今天要完成的事。") }
        }
        1 -> {
         item { Header("奖励与额度", "娱乐时间") }
@@ -104,7 +114,6 @@ class MainActivity : ComponentActivity() {
         item { CardBlock { Text("奖励记录",style=MaterialTheme.typography.titleLarge); val records=db.rewardHistory(); if(records.isEmpty()) Text("领取或使用奖励后，记录会保存在这里。",color=AppColors.Muted); (if(rewardHistoryExpanded) records else records.take(4)).forEach { Text(it,style=MaterialTheme.typography.bodySmall,color=AppColors.Muted) }; if(records.size>4) TextButton(onClick={rewardHistoryExpanded=!rewardHistoryExpanded}) { Text(if(rewardHistoryExpanded) "收起记录" else "查看全部 ${records.size} 条记录") } } }
        }
        2 -> {
-        item { Header("成长记录", "成长看得见") }
         item { GrowthHero(db) }
         item { GrowthDetails(db) }
        }
@@ -166,30 +175,37 @@ private fun focusDuration(milliseconds:Long):String = when {
  }
 }
 
-@Composable private fun TaskCard(task:Task,db:Database,timer:FocusTimer,onFocus:()->Unit,onChanged:()->Unit) {
+@Composable private fun TaskCard(task:Task,db:Database,timer:FocusTimer,onFocus:()->Unit,onChanged:()->Unit,index:Int=0,count:Int=1) {
  val haptic=androidx.compose.ui.platform.LocalHapticFeedback.current
  var expanded by remember(task.id){mutableStateOf(false)}
  var resetting by remember(task.id){mutableStateOf(false)}
  var checking by remember(task.id) { mutableStateOf(false) }; var selfCheck by remember(task.id) { mutableStateOf(false) }; var revoking by remember(task.id) { mutableStateOf(false) }
- Column(Modifier.fillMaxWidth().animateContentSize(animationSpec=motionSizeSpec()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-  GritTaskHeader(task){expanded=!expanded}
-  Text("${if(task.minutes>0) "${focusDuration(db.elapsed(task))} / 目标 ${task.minutes} 分钟" else "专注 ${focusDuration(db.elapsed(task))}"}   ·   ${if(task.done) "已完成" else if(task.runningSince>0) "计时中" else "未开始"}",color=AppColors.Muted)
-  if(!task.done && !expanded) SecondaryAction("开始专注",{if(timer.phase!="ready")timer.finish();timer.begin(task);onFocus();onChanged()})
-  TextButton(onClick={expanded=!expanded}) {Text(if(expanded) "收起详情" else "任务详情与证明")}
-  androidx.compose.animation.AnimatedVisibility(expanded,enter=androidx.compose.animation.expandVertically(tween(motionMillis()))+fadeIn(tween(motionMillis())),exit=androidx.compose.animation.shrinkVertically(tween(motionMillis()))+fadeOut(tween(motionMillis()))) { Column {
+ val active=timer.taskId==task.id && timer.phase=="work"
+ Column(Modifier.fillMaxWidth().animateContentSize(animationSpec=motionSizeSpec())) {
+  GritTaskHeader(task,focusDuration(db.elapsed(task)),active,expanded,gritTaskShape(index,count,expanded),{expanded=!expanded}) {
+   when {
+    timer.taskId==task.id && timer.phase=="work" -> timer.pause()
+    timer.taskId==task.id && timer.phase=="paused" -> timer.resume(task)
+    else -> { if(timer.phase!="ready")timer.finish();timer.begin(task);onFocus() }
+   }
+   onChanged()
+  }
+  androidx.compose.animation.AnimatedVisibility(expanded,enter=androidx.compose.animation.expandVertically(tween(motionMillis(),easing=AppMotion.Ease))+fadeIn(tween(motionMillis())),exit=androidx.compose.animation.shrinkVertically(tween(motionMillis(),easing=AppMotion.Ease))+fadeOut(tween(motionMillis()))) {
+   Surface(shape=RoundedCornerShape(bottomStart=26.dp,bottomEnd=26.dp),color=MaterialTheme.colorScheme.surfaceContainer) { Column(Modifier.fillMaxWidth().padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+   Text("${if(task.minutes>0) "${focusDuration(db.elapsed(task))} / 目标 ${task.minutes} 分钟" else "专注 ${focusDuration(db.elapsed(task))}"}   ·   ${if(task.done) "已完成" else if(task.runningSince>0) "计时中" else "未开始"}",color=AppColors.Muted)
   if(task.checklist.isNotBlank()) Text("完成标准：${task.checklist}",color=AppColors.Muted)
   ProofActions(task,db,onChanged)
   if(task.done && !task.required && !task.claimed){Text("领取奖励 · 选择一项",fontSize=14.sp);Row{if(task.rewardMinutes>0)TextButton(enabled=db.eligible(),onClick={db.claim(task,"video");onChanged()}){Text("${task.rewardMinutes} 视频分钟")};if(task.rewardGames>0)TextButton(enabled=db.eligible(),onClick={db.claim(task,"game");onChanged()}){Text("${task.rewardGames} 游戏局数")}};if(!db.eligible())Text("完成全部必做后可领取",fontSize=12.sp,color=Color.Gray)}
   if(task.claimed)Text("奖励已领取",fontSize=12.sp,color=Color.Gray)
   if(task.done) { TextButton(onClick={revoking=true}) {Text("撤销误完成")}; if(revoking) { Text("撤销后将按可用余额冲正已领取奖励；已消费的额度无法追回。",color=Color.LightGray); Row { Button(onClick={db.revoke(task);revoking=false;onChanged()}) {Text("确认撤销")}; TextButton(onClick={revoking=false}) {Text("取消")} } } }
   if(!task.done) { TaskChanges(task,db,onChanged)
-   Row(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) { if(task.runningSince>0) SecondaryAction("暂停",{if(timer.taskId==task.id && timer.phase=="work")timer.pause() else db.pause(task);onChanged()}) else PrimaryAction("开始专注",{if(timer.phase!="ready")timer.finish();timer.begin(task);onFocus();onChanged()}) }
+   Row(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) { if(task.runningSince>0) SecondaryAction("暂停",{if(timer.taskId==task.id && timer.phase=="work")timer.pause() else db.pause(task);onChanged()}) else PrimaryAction(if(timer.phase=="paused"&&timer.taskId==task.id) "继续专注" else "开始专注",{if(timer.phase=="paused"&&timer.taskId==task.id)timer.resume(task) else {if(timer.phase!="ready")timer.finish();timer.begin(task);onFocus()};onChanged()}) }
    if(db.elapsed(task)>0)TextButton(onClick={resetting=true}){Text("重新计时")}
    TextButton(onClick={checking=!checking}) {Text("确认完成")}
    if(checking) { Row(Modifier.toggleable(value=selfCheck,onValueChange={selfCheck=it}),verticalAlignment=Alignment.CenterVertically) { Checkbox(selfCheck,onCheckedChange=null); Text("我已按预设条件完成${if(task.mode=="掌握型") "独立练习或解释" else ""}") }; val allowed = selfCheck && db.elapsed(task)>=task.minutes*60000L && (task.mode=="行动型" || task.evidence.isNotBlank()); Button(enabled=allowed,onClick={db.complete(task);haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress);db.grantBase(task.date);checking=false;onChanged()}) {Text("完成任务")}; Text("请如实自检，照片和附件仅保存在本机。",fontSize=12.sp,color=Color.Gray) }
 
   }
-  } }
+  } } }
  }
  if(resetting)AlertDialog(onDismissRequest={resetting=false},title={Text("重新开始这次专注？")},text={Text("这项任务已计入的专注时长将清零，完成证明会保留。")},confirmButton={TextButton(onClick={db.restart(task);resetting=false;onChanged()}){Text("清零计时")}},dismissButton={TextButton(onClick={resetting=false}){Text("取消")}})
 }

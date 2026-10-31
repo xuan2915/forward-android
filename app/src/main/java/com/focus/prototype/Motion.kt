@@ -61,8 +61,8 @@ data class GrowthMotion(val xp:Float, val feedback:String)
  }
 }
 // Counter transition adapted from AnimationExample5; no sample/demo state is retained.
-@Composable fun MotionCounter(value:Int,style:TextStyle) {
- val duration=motionMillis()
+@Composable fun MotionCounter(value:Int,style:TextStyle,animationDuration:Int=AppMotion.Standard) {
+  val duration=motionMillis(animationDuration)
  AnimatedContent(value,transitionSpec={
   val direction=if(targetState>initialState) 1 else -1
   (slideInVertically(tween(duration, easing=AppMotion.Ease)){it/4*direction}+fadeIn(tween(duration))) togetherWith

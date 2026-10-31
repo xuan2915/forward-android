@@ -72,3 +72,11 @@ fun calendarMapStreakShape(
         bottomEnd = rightRadius,
     )
 }
+
+// Adapted from Grit shared/ui/EnumExt.kt heatMapStreakShape.
+fun gritHeatMapStreakShape(position:StreakPosition,isFirstDayOfWeek:Boolean,isLastDayOfWeek:Boolean):Shape {
+ if(position==StreakPosition.ISOLATED)return CircleShape
+ val top=when { position==StreakPosition.START->20.dp;isFirstDayOfWeek->4.dp;else->0.dp }
+ val bottom=when { position==StreakPosition.END->20.dp;isLastDayOfWeek->4.dp;else->0.dp }
+ return RoundedCornerShape(topStart=top,topEnd=top,bottomStart=bottom,bottomEnd=bottom)
+}

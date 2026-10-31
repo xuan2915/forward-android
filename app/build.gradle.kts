@@ -3,7 +3,7 @@ android {
  namespace = "com.focus.prototype"
  compileSdk = 35
  buildToolsVersion = "35.0.0"
- defaultConfig { applicationId = "com.focus.prototype"; minSdk = 26; targetSdk = 35; versionCode = 9; versionName = "0.6.1" }
+ defaultConfig { applicationId = "com.focus.prototype"; minSdk = 26; targetSdk = 35; versionCode = 10; versionName = "0.6.2" }
  defaultConfig { testInstrumentationRunner = "com.focus.prototype.BusinessChecks" }
  buildFeatures { compose = true;buildConfig = true }
  testOptions { unitTests.isIncludeAndroidResources = true }
@@ -17,6 +17,7 @@ dependencies {
  implementation(platform("androidx.compose:compose-bom:2024.12.01"))
  implementation("androidx.activity:activity-compose:1.9.3")
  implementation("androidx.compose.material3:material3")
+ implementation("com.materialkolor:material-kolor:1.7.1")
  implementation("com.kizitonwose.calendar:compose:2.6.1")
  implementation("com.patrykandpatrick.vico:compose-m3:1.16.0")
 }

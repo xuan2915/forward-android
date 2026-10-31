@@ -22,6 +22,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 @Composable fun AppNavigation(page:Int,onPage:(Int)->Unit) {
  val tabs=listOf(0 to "今天",4 to "专注",1 to "奖励",2 to "成长",3 to "复盘")
@@ -50,25 +52,52 @@ import androidx.compose.ui.platform.LocalHapticFeedback
  }
 }
 
-// Adapted from Grit StartStats.kt (GPL-3.0-or-later), Copyright (C) 2026 Shubham Gorai.
-// Consistency input replaced by the existing XP level fraction; streaks use Database.
+// StartStats composition adapted from Grit habit/ui/component/stats/StartStats.kt.
 @Composable fun GrowthHero(db:Database) {
- val motion=LocalGrowthMotion.current;val xp=motion.xp.toInt();val level=xp/500+1;val progress=(motion.xp%500)/500f
- GrowthFeedback()
- Text("等级 $level · ${listOf("启程","萌芽","探索","积累","进阶","坚韧","精进","卓越")[(level-1).coerceAtMost(7)]}",style=MaterialTheme.typography.headlineSmall)
- Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
-  Box(Modifier.size(154.dp),contentAlignment=Alignment.Center) {
-   CircularProgressIndicator(progress={progress},strokeCap=StrokeCap.Round,strokeWidth=24.dp,trackColor=MaterialTheme.colorScheme.surfaceContainerHighest,modifier=Modifier.fillMaxSize())
-   Column(horizontalAlignment=Alignment.CenterHorizontally) {Text("$xp",style=MaterialTheme.typography.headlineSmall);Text("XP",style=MaterialTheme.typography.titleSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+ val motion=LocalGrowthMotion.current
+ val xp=motion.xp.toInt().coerceAtLeast(0)
+ val level=xp/500+1
+ val levelProgress=(motion.xp%500)/500f
+ val rank=listOf("启程","萌芽","探索","积累","进阶","坚韧","精进","卓越")[(level-1).coerceAtMost(7)]
+ val started=db.readableDatabase.rawQuery("SELECT MIN(day) FROM tasks",null).use { if(it.moveToFirst()) it.getString(0) else null }
+ Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
+  Text("成长记录",style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.onSurfaceVariant)
+  Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.Bottom,horizontalArrangement=Arrangement.SpaceBetween) {
+   Column(verticalArrangement=Arrangement.spacedBy(2.dp)) {
+    Text("等级 $level · $rank",style=MaterialTheme.typography.headlineMedium.copy(fontWeight=FontWeight.ExtraBold))
+    Text("${500-levelProgress.times(500).toInt()} XP 升级",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+   }
+   Row(verticalAlignment=Alignment.Bottom,horizontalArrangement=Arrangement.spacedBy(5.dp)) {
+    MotionCounter(db.xp(),MaterialTheme.typography.titleLarge.copy(fontWeight=FontWeight.Bold),AppMotion.Growth)
+    Text("XP",style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(bottom=4.dp))
+   }
   }
-  Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
-   listOf("最长连续" to db.bestStreak(),"当前连续" to db.streak()).forEach { (label,value)->
-    Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer,RoundedCornerShape(20.dp)).padding(12.dp),verticalAlignment=Alignment.CenterVertically) {
-     Column {Text(label,style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onPrimaryContainer);Text("$value 天",style=MaterialTheme.typography.titleMedium,color=MaterialTheme.colorScheme.onPrimaryContainer)}
+  GrowthFeedback()
+  Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+   Box(Modifier.size(190.dp),contentAlignment=Alignment.Center) {
+    CircularProgressIndicator(progress={levelProgress},strokeCap=StrokeCap.Round,strokeWidth=36.dp,trackColor=MaterialTheme.colorScheme.surfaceContainerHighest,modifier=Modifier.fillMaxSize())
+    Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(1.dp)) {
+     Text("${(levelProgress*100).toInt()}%",style=MaterialTheme.typography.headlineSmall.copy(fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.primary))
+     Text("升级进度",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
     }
+   }
+   Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(5.dp)) {
+    GritGrowthStat("开始记录",started?.let { LocalDate.parse(it).format(DateTimeFormatter.ofPattern("M月d日")) } ?: "今天",R.drawable.grit_flag)
+    GritGrowthStat("最长连续", "${db.bestStreak()} 天",R.drawable.grit_heat)
+    GritGrowthStat("当前连续", "${db.streak()} 天",R.drawable.grit_chart)
    }
   }
  }
- Text("距下一级 ${500-xp%500} XP",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
- LinearProgressIndicator(progress={progress},modifier=Modifier.fillMaxWidth(),color=AppColors.Accent,trackColor=AppColors.Raised)
+}
+
+@Composable private fun GritGrowthStat(label:String,value:String,icon:Int) {
+ Row(Modifier.fillMaxWidth().heightIn(min=54.dp).background(MaterialTheme.colorScheme.primaryContainer,RoundedCornerShape(20.dp)).padding(7.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(7.dp)) {
+  Surface(shape=RoundedCornerShape(16.dp),color=MaterialTheme.colorScheme.primary,modifier=Modifier.width(32.dp).height(40.dp)) {
+   Icon(androidx.compose.ui.res.painterResource(icon),null,tint=MaterialTheme.colorScheme.onPrimary,modifier=Modifier.padding(8.dp))
+  }
+  Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(1.dp)) {
+   Text(label,style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onPrimaryContainer,maxLines=1)
+   Text(value,style=MaterialTheme.typography.titleSmall.copy(fontWeight=FontWeight.SemiBold),color=MaterialTheme.colorScheme.onPrimaryContainer,maxLines=1)
+  }
+ }
 }

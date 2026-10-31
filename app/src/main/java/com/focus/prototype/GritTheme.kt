@@ -14,20 +14,20 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-// Adapted from GritTheme.android.kt: Android dark Material You branch.
-// MaterialExpressiveTheme/MotionScheme require newer Material3; existing MaterialTheme
-// hosts the same scheme/typography and our compatible motion tokens instead.
+// Adapted from GritTheme.android.kt: its fixed seed color, TONALSPOT scheme, and
+// Figtree typography. MaterialExpressiveTheme requires a newer Material3 than this app uses.
 package com.focus.prototype
-import android.os.Build
-import androidx.compose.runtime.SideEffect
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import com.materialkolor.PaletteStyle
+import com.materialkolor.rememberDynamicColorScheme
 import androidx.compose.ui.platform.LocalContext
 @Composable fun GritTheme(content:@Composable ()->Unit) {
  val context=LocalContext.current
- val colorScheme=if(Build.VERSION.SDK_INT>=31) dynamicDarkColorScheme(context) else darkColorScheme()
- SideEffect { (context as? android.app.Activity)?.window?.let { it.statusBarColor=colorScheme.background.toArgb();it.navigationBarColor=colorScheme.background.toArgb() } }
+ // Grit's default Theme uses a fixed white seed with TONALSPOT, not the device wallpaper.
+ val colorScheme=rememberDynamicColorScheme(seedColor=Color(0xFFFFFFFF),isDark=true,isAmoled=false,style=PaletteStyle.TonalSpot)
+ androidx.compose.runtime.SideEffect { (context as? android.app.Activity)?.window?.let { it.statusBarColor=android.graphics.Color.rgb(17,17,17);it.navigationBarColor=android.graphics.Color.rgb(17,17,17) } }
  AppColors.apply(colorScheme)
  MaterialTheme(colorScheme=colorScheme,typography=provideTypography(),content=content)
 }

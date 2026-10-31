@@ -51,6 +51,10 @@ fun GrowthDetails(db: Database) {
         firstDayOfWeek = DayOfWeek.MONDAY,
     )
     val scope = rememberCoroutineScope()
+    LaunchedEffect(selectedDate) {
+        val targetMonth = YearMonth.from(selectedDate)
+        if (targetMonth != calendarState.firstVisibleMonth.yearMonth) calendarState.animateScrollToMonth(targetMonth)
+    }
     val visibleMonth = calendarState.firstVisibleMonth.yearMonth
     val monthDays = (1..visibleMonth.lengthOfMonth()).map { visibleMonth.atDay(it) }
     val completed = monthDays.count { history[it.toString()] == "完成" }
@@ -58,7 +62,10 @@ fun GrowthDetails(db: Database) {
     val missed = monthDays.count { history[it.toString()] == "未完成" }
     val stats = (6 downTo 0).map { offset -> dailyStats(db, today.minusDays(offset.toLong())) }
 
-    GritAnalyticsHeader("成长日历")
+    GritAnalyticsHeader("过去一年", icon = R.drawable.grit_heat)
+    GritWeeklyHeatMap(today, history) { selectedDate = it }
+
+    GritAnalyticsHeader("成长日历", icon = R.drawable.grit_calendar)
     QuietSurface {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             TextButton(onClick = { scope.launch { calendarState.animateScrollToMonth(visibleMonth.minusMonths(1)) } }) { Text("‹", color = AppColors.Muted, fontSize = 24.sp) }
@@ -123,7 +130,7 @@ fun GrowthDetails(db: Database) {
     val review = if (selectedState != null) db.readReview(selectedDate.toString()).filter { it.isNotBlank() } else emptyList()
     if (review.isNotEmpty()) Text(review.joinToString("\n"), style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
 
-    GritAnalyticsHeader("近 7 天")
+    GritAnalyticsHeader("近 7 天", icon = R.drawable.grit_analytics)
     QuietSurface {
         val total = stats.sumOf { it.total }
         val done = stats.sumOf { it.completed }
@@ -158,7 +165,7 @@ fun GrowthDetails(db: Database) {
         }
     }
 
-    GritAnalyticsHeader("近 30 天")
+    GritAnalyticsHeader("近 30 天", icon = R.drawable.grit_chart)
     val monthStats = taskStats(db, today.minusDays(29), today)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -182,7 +189,7 @@ fun GrowthDetails(db: Database) {
         Triple("专注十小时", "累计专注 ${(lifetime.second / 60000).coerceAtMost(600)} / 600 分钟", lifetime.second >= 600 * 60000L),
     )
     var expanded by remember { mutableStateOf(false) }
-    GritAnalyticsHeader("成长里程碑") { TextButton(onClick={expanded=!expanded}) { Text(if(expanded) "收起" else "展开") } }
+    GritAnalyticsHeader("成长里程碑", icon = R.drawable.grit_flag) { TextButton(onClick={expanded=!expanded}) { Text(if(expanded) "收起" else "展开") } }
     androidx.compose.animation.AnimatedVisibility(expanded,enter=androidx.compose.animation.expandVertically(androidx.compose.animation.core.tween(motionMillis())),exit=androidx.compose.animation.shrinkVertically(androidx.compose.animation.core.tween(motionMillis()))) { Column {
     Text("每一步都来自真实的任务与专注记录。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
     milestones.forEachIndexed { index, (title, detail, earned) ->
@@ -197,7 +204,7 @@ fun GrowthDetails(db: Database) {
     }
 
     } }
-    GritAnalyticsHeader("计划与例外记录")
+    GritAnalyticsHeader("计划与例外记录", icon = R.drawable.grit_calendar)
     val audits = db.readableDatabase.rawQuery("SELECT day,detail FROM audit ORDER BY created DESC LIMIT 12", null)
     audits.use { cursor ->
         if (!cursor.moveToFirst()) Text("计划变更与紧急解锁会显示在这里。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
