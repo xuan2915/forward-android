@@ -59,7 +59,7 @@ class MainActivity : ComponentActivity() {
    LaunchedEffect(Unit) { while(true) { db.settleToday();focusTimer.advance();if(now%10L==0L)db.checkpoint();now++; delay(1000) } }
    val tick = now + refresh; val today = db.day(); val c = remember(today,tick) { db.contract(today) }; val tasks = remember(today,tick) { db.tasks(today) }
    val protected = remember(tick) { val id = ComponentName(this,FocusService::class.java).flattenToString(); FocusService.connected && Settings.Secure.getString(contentResolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)?.split(':')?.any { it.equals(id,true) } == true }
-   FocusTheme {
+   FocusTheme { MotionHost(db.xp(),showToast=page!=2) {
     androidx.activity.compose.BackHandler(enabled=page==5 || editor) {if(editor)editor=false else page=0}
     Scaffold(containerColor=AppColors.Background, bottomBar = { AppNavigation(page){page=it;editor=false} }) { pad ->
      AnimatedContent(targetState=page,transitionSpec={fadeIn(tween(AppMotion.Standard))+slideInHorizontally(tween(AppMotion.Standard)){it/28} togetherWith fadeOut(tween(AppMotion.Short))+slideOutHorizontally(tween(AppMotion.Short)){ -it/36 }},label="page-transition") { screen ->
@@ -68,10 +68,13 @@ class MainActivity : ComponentActivity() {
        item { TaskEditor(targetDay, db, onCancel={ editor=false }, onSave={ editor=false; refresh++ }) }
       } else when(screen) {
        0 -> {
-        item { Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically){Header(LocalDate.parse(today).format(DateTimeFormatter.ofPattern("M月d日 · E",Locale.CHINA)), "今日任务");TextButton(onClick={page=5}){Text("设置",color=AppColors.Muted)}}; if(db.setting("changed_$today")=="true") Text("今天的计划有调整 · 查看成长记录",color=AppColors.Muted) }; item { ProgressView(tasks.count{it.required && it.done},tasks.count{it.required}) }
-        item { CardBlock { Text(if(c.confirmed) "今日计划" else "确认今日计划",style=MaterialTheme.typography.titleLarge); Text("必做 ${tasks.count{it.required && it.done}} / ${tasks.count{it.required}}  ·  选做 ${tasks.count{!it.required && it.done}} / ${tasks.count{!it.required}}",color=AppColors.Muted); Text(if(!protected) "保护未开启 · ${db.balance("video")/60000} 分钟" else if(c.emergency) "今天已紧急解锁" else if(!db.eligible()) "娱乐已锁定 · 完成必做任务后解锁" else "娱乐已解锁 · 还剩 ${db.balance("video")/60000} 分钟",color=if(db.eligible() && protected) AppColors.Accent else AppColors.Muted) } }
+        item { Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically){Header(LocalDate.parse(today).format(DateTimeFormatter.ofPattern("M月d日 · E",Locale.CHINA)), "今日任务");TextButton(onClick={page=5}){Text("设置",color=AppColors.Muted)}}; if(db.setting("changed_$today")=="true") Text("今天的计划有调整 · 查看成长记录",color=AppColors.Muted) }; item { ProgressView(tasks.count{it.required && it.done},tasks.count{it.required});GrowthFeedback() }
+        item { CardBlock {
+         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) { Text("必做 ${tasks.count{it.required && it.done}} / ${tasks.count{it.required}}",style=MaterialTheme.typography.titleMedium);Text("选做 ${tasks.count{!it.required && it.done}} / ${tasks.count{!it.required}}",color=AppColors.Muted) }
+         Text(if(c.emergency) "今天已紧急解锁" else if(!db.eligible()) "完成必做后解锁娱乐" else "娱乐时间 · ${db.balance("video")/60000} 分钟",color=AppColors.Accent,style=MaterialTheme.typography.bodyMedium)
+        } }
         if(db.setting("gate_changed_$today")=="true") item {Text("今天删减过必做任务，娱乐保持锁定。需要时可以紧急解锁，原因会留在记录中。",color=AppColors.Warning)}
-        if(!protected) item { CardBlock { Text("应用保护尚未开启",color=AppColors.Warning); Text("授权无障碍服务后，受限应用才会按额度拦截。",color=AppColors.Muted); SecondaryAction("前往系统授权",{ startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }) } }
+        if(!protected) item { TextButton(onClick={startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))}) { Text("应用保护未开启 · 前往授权",color=AppColors.Warning) } }
         item { Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) { Text("今日任务",fontSize=22.sp,fontWeight=FontWeight.Bold); TextButton(onClick={targetDay=today; editor=true}) { Text("＋ 添加任务") } } }
         if(!c.confirmed) item { ContractEditor(db, c) { refresh++ } }
         val continuing = db.runningTasks().filter { it.date != today }
@@ -130,8 +133,10 @@ class MainActivity : ComponentActivity() {
 }
 }
 
+}
+
 @Composable private fun Header(label:String,title:String) { PageHeading(label,title) }
-@Composable private fun CardBlock(content:@Composable ColumnScope.()->Unit) { QuietSurface(Modifier.animateContentSize(),content) }
+@Composable private fun CardBlock(content:@Composable ColumnScope.()->Unit) { QuietSurface(Modifier.animateContentSize(animationSpec=motionSizeSpec()),content=content) }
 @Composable private fun NumberField(label:String,value:String,onValue:(String)->Unit) { OutlinedTextField(value,onValueChange={onValue(it.filter(Char::isDigit).take(4))},label={Text(label)},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),singleLine=true,modifier=Modifier.fillMaxWidth()) }
 private fun focusDuration(milliseconds:Long):String = when {
  milliseconds < 60_000 -> "${milliseconds/1_000} 秒"
@@ -162,11 +167,16 @@ private fun focusDuration(milliseconds:Long):String = when {
 }
 
 @Composable private fun TaskCard(task:Task,db:Database,timer:FocusTimer,onFocus:()->Unit,onChanged:()->Unit) {
+ val haptic=androidx.compose.ui.platform.LocalHapticFeedback.current
+ var expanded by remember(task.id){mutableStateOf(false)}
  var resetting by remember(task.id){mutableStateOf(false)}
  var checking by remember(task.id) { mutableStateOf(false) }; var selfCheck by remember(task.id) { mutableStateOf(false) }; var revoking by remember(task.id) { mutableStateOf(false) }
- CardBlock {
-  Text("${if(task.required) "必做" else "选做"}  ·  ${task.mode}",color=AppColors.Muted,style=MaterialTheme.typography.labelMedium); Text(task.title,style=MaterialTheme.typography.titleLarge)
+ Column(Modifier.fillMaxWidth().animateContentSize(animationSpec=motionSizeSpec()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+  GritTaskHeader(task){expanded=!expanded}
   Text("${if(task.minutes>0) "${focusDuration(db.elapsed(task))} / 目标 ${task.minutes} 分钟" else "专注 ${focusDuration(db.elapsed(task))}"}   ·   ${if(task.done) "已完成" else if(task.runningSince>0) "计时中" else "未开始"}",color=AppColors.Muted)
+  if(!task.done && !expanded) SecondaryAction("开始专注",{if(timer.phase!="ready")timer.finish();timer.begin(task);onFocus();onChanged()})
+  TextButton(onClick={expanded=!expanded}) {Text(if(expanded) "收起详情" else "任务详情与证明")}
+  androidx.compose.animation.AnimatedVisibility(expanded,enter=androidx.compose.animation.expandVertically(tween(motionMillis()))+fadeIn(tween(motionMillis())),exit=androidx.compose.animation.shrinkVertically(tween(motionMillis()))+fadeOut(tween(motionMillis()))) { Column {
   if(task.checklist.isNotBlank()) Text("完成标准：${task.checklist}",color=AppColors.Muted)
   ProofActions(task,db,onChanged)
   if(task.done && !task.required && !task.claimed){Text("领取奖励 · 选择一项",fontSize=14.sp);Row{if(task.rewardMinutes>0)TextButton(enabled=db.eligible(),onClick={db.claim(task,"video");onChanged()}){Text("${task.rewardMinutes} 视频分钟")};if(task.rewardGames>0)TextButton(enabled=db.eligible(),onClick={db.claim(task,"game");onChanged()}){Text("${task.rewardGames} 游戏局数")}};if(!db.eligible())Text("完成全部必做后可领取",fontSize=12.sp,color=Color.Gray)}
@@ -176,9 +186,10 @@ private fun focusDuration(milliseconds:Long):String = when {
    Row(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) { if(task.runningSince>0) SecondaryAction("暂停",{if(timer.taskId==task.id && timer.phase=="work")timer.pause() else db.pause(task);onChanged()}) else PrimaryAction("开始专注",{if(timer.phase!="ready")timer.finish();timer.begin(task);onFocus();onChanged()}) }
    if(db.elapsed(task)>0)TextButton(onClick={resetting=true}){Text("重新计时")}
    TextButton(onClick={checking=!checking}) {Text("确认完成")}
-   if(checking) { Row(Modifier.toggleable(value=selfCheck,onValueChange={selfCheck=it}),verticalAlignment=Alignment.CenterVertically) { Checkbox(selfCheck,onCheckedChange=null); Text("我已按预设条件完成${if(task.mode=="掌握型") "独立练习或解释" else ""}") }; val allowed = selfCheck && db.elapsed(task)>=task.minutes*60000L && (task.mode=="行动型" || task.evidence.isNotBlank()); Button(enabled=allowed,onClick={db.complete(task);db.grantBase(task.date);checking=false;onChanged()}) {Text("完成任务")}; Text("请如实自检，照片和附件仅保存在本机。",fontSize=12.sp,color=Color.Gray) }
+   if(checking) { Row(Modifier.toggleable(value=selfCheck,onValueChange={selfCheck=it}),verticalAlignment=Alignment.CenterVertically) { Checkbox(selfCheck,onCheckedChange=null); Text("我已按预设条件完成${if(task.mode=="掌握型") "独立练习或解释" else ""}") }; val allowed = selfCheck && db.elapsed(task)>=task.minutes*60000L && (task.mode=="行动型" || task.evidence.isNotBlank()); Button(enabled=allowed,onClick={db.complete(task);haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress);db.grantBase(task.date);checking=false;onChanged()}) {Text("完成任务")}; Text("请如实自检，照片和附件仅保存在本机。",fontSize=12.sp,color=Color.Gray) }
 
   }
+  } }
  }
  if(resetting)AlertDialog(onDismissRequest={resetting=false},title={Text("重新开始这次专注？")},text={Text("这项任务已计入的专注时长将清零，完成证明会保留。")},confirmButton={TextButton(onClick={db.restart(task);resetting=false;onChanged()}){Text("清零计时")}},dismissButton={TextButton(onClick={resetting=false}){Text("取消")}})
 }

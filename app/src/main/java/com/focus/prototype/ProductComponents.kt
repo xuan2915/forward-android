@@ -2,6 +2,7 @@ package com.focus.prototype
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
@@ -49,22 +50,25 @@ import androidx.compose.ui.platform.LocalHapticFeedback
  }
 }
 
+// Adapted from Grit StartStats.kt (GPL-3.0-or-later), Copyright (C) 2026 Shubham Gorai.
+// Consistency input replaced by the existing XP level fraction; streaks use Database.
 @Composable fun GrowthHero(db:Database) {
- val xp=db.xp();val level=xp/500+1;val progress by animateFloatAsState((xp%500)/500f,label="level")
- val rank=listOf("启程","萌芽","探索","积累","进阶","坚韧","精进","卓越")[(xp/500).coerceAtMost(7)]
- Row(Modifier.fillMaxWidth().padding(vertical=4.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(18.dp)) {
-  Box(Modifier.size(108.dp),contentAlignment=Alignment.Center) {
-   Canvas(Modifier.fillMaxSize().padding(7.dp)){val stroke=Stroke(4.dp.toPx(),cap=StrokeCap.Round);drawArc(AppColors.Raised,-90f,360f,false,style=stroke);drawArc(AppColors.Accent,-90f,360f*progress,false,style=stroke)}
-   Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(1.dp)){Text("$xp",fontSize=29.sp,fontWeight=FontWeight.Light);Text("XP",fontSize=10.sp,color=AppColors.Muted)}
+ val motion=LocalGrowthMotion.current;val xp=motion.xp.toInt();val level=xp/500+1;val progress=(motion.xp%500)/500f
+ GrowthFeedback()
+ Text("等级 $level · ${listOf("启程","萌芽","探索","积累","进阶","坚韧","精进","卓越")[(level-1).coerceAtMost(7)]}",style=MaterialTheme.typography.headlineSmall)
+ Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+  Box(Modifier.size(154.dp),contentAlignment=Alignment.Center) {
+   CircularProgressIndicator(progress={progress},strokeCap=StrokeCap.Round,strokeWidth=24.dp,trackColor=MaterialTheme.colorScheme.surfaceContainerHighest,modifier=Modifier.fillMaxSize())
+   Column(horizontalAlignment=Alignment.CenterHorizontally) {Text("$xp",style=MaterialTheme.typography.headlineSmall);Text("XP",style=MaterialTheme.typography.titleSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
   }
-  Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-   Text("等级 $level · $rank",style=MaterialTheme.typography.titleLarge)
-   Text("距下一级 ${500-xp%500} XP",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
-   LinearProgressIndicator(progress={progress},modifier=Modifier.fillMaxWidth().height(3.dp),color=AppColors.Accent,trackColor=AppColors.Raised)
+  Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+   listOf("最长连续" to db.bestStreak(),"当前连续" to db.streak()).forEach { (label,value)->
+    Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer,RoundedCornerShape(20.dp)).padding(12.dp),verticalAlignment=Alignment.CenterVertically) {
+     Column {Text(label,style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onPrimaryContainer);Text("$value 天",style=MaterialTheme.typography.titleMedium,color=MaterialTheme.colorScheme.onPrimaryContainer)}
+    }
+   }
   }
  }
- Row(Modifier.fillMaxWidth().padding(top=4.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-  Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(2.dp)){Text("${db.streak()} 天",style=MaterialTheme.typography.titleLarge);Text("当前连续完成",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)}
-  Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(2.dp)){Text("${db.bestStreak()} 天",style=MaterialTheme.typography.titleLarge);Text("最长连续记录",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)}
- }
+ Text("距下一级 ${500-xp%500} XP",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
+ LinearProgressIndicator(progress={progress},modifier=Modifier.fillMaxWidth(),color=AppColors.Accent,trackColor=AppColors.Raised)
 }

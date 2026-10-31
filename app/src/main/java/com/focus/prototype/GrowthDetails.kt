@@ -1,5 +1,7 @@
+// CalendarMap layout adapted from Grit, Copyright (C) 2026 Shubham Gorai, GPL-3.0-or-later.
 package com.focus.prototype
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -56,7 +58,7 @@ fun GrowthDetails(db: Database) {
     val missed = monthDays.count { history[it.toString()] == "未完成" }
     val stats = (6 downTo 0).map { offset -> dailyStats(db, today.minusDays(offset.toLong())) }
 
-    SectionHeading("成长日历")
+    GritAnalyticsHeader("成长日历")
     QuietSurface {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             TextButton(onClick = { scope.launch { calendarState.animateScrollToMonth(visibleMonth.minusMonths(1)) } }) { Text("‹", color = AppColors.Muted, fontSize = 24.sp) }
@@ -86,9 +88,9 @@ fun GrowthDetails(db: Database) {
             }
         }
         HorizontalCalendar(
-            modifier = Modifier.fillMaxWidth().height(248.dp),
+            modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer,MaterialTheme.shapes.medium).animateContentSize(animationSpec=motionSizeSpec()),
             state = calendarState,
-            dayContent = { day -> CalendarCell(day, today, selectedDate, history) { selectedDate = it } },
+            dayContent = { day -> GritCalendarDay(day, today, selectedDate, history) { selectedDate = it } },
             monthHeader = {
                 Row(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
                     listOf("一", "二", "三", "四", "五", "六", "日").forEach {
@@ -121,7 +123,7 @@ fun GrowthDetails(db: Database) {
     val review = if (selectedState != null) db.readReview(selectedDate.toString()).filter { it.isNotBlank() } else emptyList()
     if (review.isNotEmpty()) Text(review.joinToString("\n"), style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
 
-    SectionHeading("近 7 天")
+    GritAnalyticsHeader("近 7 天")
     QuietSurface {
         val total = stats.sumOf { it.total }
         val done = stats.sumOf { it.completed }
@@ -156,7 +158,7 @@ fun GrowthDetails(db: Database) {
         }
     }
 
-    SectionHeading("近 30 天")
+    GritAnalyticsHeader("近 30 天")
     val monthStats = taskStats(db, today.minusDays(29), today)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -179,7 +181,9 @@ fun GrowthDetails(db: Database) {
         Triple("一周节奏", "最长连续 $bestStreak / 7 天", bestStreak >= 7),
         Triple("专注十小时", "累计专注 ${(lifetime.second / 60000).coerceAtMost(600)} / 600 分钟", lifetime.second >= 600 * 60000L),
     )
-    SectionHeading("成长里程碑")
+    var expanded by remember { mutableStateOf(false) }
+    GritAnalyticsHeader("成长里程碑") { TextButton(onClick={expanded=!expanded}) { Text(if(expanded) "收起" else "展开") } }
+    androidx.compose.animation.AnimatedVisibility(expanded,enter=androidx.compose.animation.expandVertically(androidx.compose.animation.core.tween(motionMillis())),exit=androidx.compose.animation.shrinkVertically(androidx.compose.animation.core.tween(motionMillis()))) { Column {
     Text("每一步都来自真实的任务与专注记录。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
     milestones.forEachIndexed { index, (title, detail, earned) ->
         Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -192,7 +196,8 @@ fun GrowthDetails(db: Database) {
         if (index < milestones.lastIndex) Hairline()
     }
 
-    SectionHeading("计划与例外记录")
+    } }
+    GritAnalyticsHeader("计划与例外记录")
     val audits = db.readableDatabase.rawQuery("SELECT day,detail FROM audit ORDER BY created DESC LIMIT 12", null)
     audits.use { cursor ->
         if (!cursor.moveToFirst()) Text("计划变更与紧急解锁会显示在这里。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)

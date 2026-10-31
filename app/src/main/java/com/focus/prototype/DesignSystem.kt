@@ -20,7 +20,11 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.Typography
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.animation.core.*
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,17 +37,30 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 object AppColors {
-    val Background = Color(0xFF111214)
-    val Surface = Color(0xFF191B1F)
-    val Raised = Color(0xFF23262A)
-    val Border = Color(0xFF32353A)
-    val Text = Color(0xFFF1F0ED)
-    val Muted = Color(0xFFA1A4A7)
-    val Quiet = Color(0xFF74787D)
-    val Accent = Color(0xFFA6B8AE)
-    val AccentInk = Color(0xFF161B18)
-    val AccentWash = Color(0xFF252D29)
-    val Warning = Color(0xFFC99186)
+ var Background = darkColorScheme().background
+ var Surface = darkColorScheme().surfaceContainer
+ var Raised = darkColorScheme().surfaceContainerHigh
+ var Border = darkColorScheme().outlineVariant
+ var Text = darkColorScheme().onSurface
+ var Muted = darkColorScheme().onSurfaceVariant
+ var Quiet = darkColorScheme().onSurfaceVariant
+ var Accent = darkColorScheme().primary
+ var AccentInk = darkColorScheme().onPrimary
+ var AccentWash = darkColorScheme().primaryContainer
+ var Warning = darkColorScheme().error
+ fun apply(s:androidx.compose.material3.ColorScheme) {
+Background=s.background
+Surface=s.surfaceContainer
+Raised=s.surfaceContainerHigh
+Border=s.outlineVariant
+Text=s.onSurface
+Muted=s.onSurfaceVariant
+Quiet=s.onSurfaceVariant
+Accent=s.primary
+AccentInk=s.onPrimary
+AccentWash=s.primaryContainer
+Warning=s.error
+ }
 }
 
 object AppSpace {
@@ -58,58 +75,15 @@ object AppSpace {
 object AppMotion {
     const val Short = 160
     const val Standard = 260
+    const val Growth = 1000
+    val Ease = androidx.compose.animation.core.CubicBezierEasing(0.2f,0f,0f,1f)
+    const val Damping = 1f
+    const val Stiffness = 500f
 }
-
-private val AppTypography = Typography(
-    displayLarge = TextStyle(fontSize = 50.sp, lineHeight = 58.sp, fontWeight = FontWeight.Light, letterSpacing = (-1.1).sp),
-    displayMedium = TextStyle(fontSize = 40.sp, lineHeight = 48.sp, fontWeight = FontWeight.Light, letterSpacing = (-0.8).sp),
-    displaySmall = TextStyle(fontSize = 32.sp, lineHeight = 40.sp, fontWeight = FontWeight.Normal, letterSpacing = (-0.5).sp),
-    headlineLarge = TextStyle(fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.3).sp),
-    headlineMedium = TextStyle(fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold),
-    headlineSmall = TextStyle(fontSize = 21.sp, lineHeight = 29.sp, fontWeight = FontWeight.Medium),
-    titleLarge = TextStyle(fontSize = 19.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold),
-    titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 23.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.1.sp),
-    titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
-    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 25.sp, letterSpacing = 0.1.sp),
-    bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 21.sp),
-    bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
-    labelLarge = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
-    labelMedium = TextStyle(fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.2.sp),
-    labelSmall = TextStyle(fontSize = 10.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.5.sp),
-)
 
 @Composable
 fun FocusTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = darkColorScheme(
-            primary = AppColors.Accent,
-            onPrimary = AppColors.AccentInk,
-            primaryContainer = AppColors.AccentWash,
-            onPrimaryContainer = AppColors.Text,
-            secondary = AppColors.Accent,
-            onSecondary = AppColors.AccentInk,
-            secondaryContainer = AppColors.AccentWash,
-            onSecondaryContainer = AppColors.Accent,
-            background = AppColors.Background,
-            onBackground = AppColors.Text,
-            surface = AppColors.Surface,
-            onSurface = AppColors.Text,
-            surfaceVariant = AppColors.Raised,
-            onSurfaceVariant = AppColors.Muted,
-            outline = AppColors.Border,
-            outlineVariant = AppColors.Border,
-            error = AppColors.Warning,
-        ),
-        typography = AppTypography,
-        shapes = Shapes(
-            extraSmall = RoundedCornerShape(8.dp),
-            small = RoundedCornerShape(14.dp),
-            medium = RoundedCornerShape(18.dp),
-            large = RoundedCornerShape(24.dp),
-            extraLarge = RoundedCornerShape(30.dp),
-        ),
-        content = content,
-    )
+    GritTheme(content)
 }
 
 @Composable
@@ -130,20 +104,24 @@ fun SectionHeading(title: String, trailing: (@Composable () -> Unit)? = null) {
 }
 
 @Composable
-fun QuietSurface(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+fun QuietSurface(modifier: Modifier = Modifier, color:Color = MaterialTheme.colorScheme.surfaceContainer, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(AppColors.Surface).padding(16.dp),
+        modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(color).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         content = content,
     )
 }
 
 @Composable
-fun PrimaryAction(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
+fun PrimaryAction(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, icon: (@Composable () -> Unit)? = null) {
     val haptic = LocalHapticFeedback.current
+    val interaction=remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if(pressed && !LocalReducedMotion.current) .975f else 1f,spring(dampingRatio=AppMotion.Damping,stiffness=AppMotion.Stiffness),label="press")
     Button(
-        onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onClick() },
-        modifier = modifier.height(52.dp),
+        interactionSource=interaction,
+        onClick = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onClick() },
+        modifier = modifier.height(52.dp).graphicsLayer { scaleX=scale;scaleY=scale },
         enabled = enabled,
         shape = RoundedCornerShape(14.dp),
         colors = ButtonDefaults.buttonColors(
@@ -152,7 +130,7 @@ fun PrimaryAction(label: String, onClick: () -> Unit, modifier: Modifier = Modif
             disabledContainerColor = AppColors.Raised,
             disabledContentColor = AppColors.Quiet,
         ),
-    ) { Text(label, style = MaterialTheme.typography.titleMedium) }
+    ) { icon?.invoke(); if(icon!=null) Spacer(Modifier.padding(end=8.dp)); androidx.compose.animation.Crossfade(label,animationSpec=tween(motionMillis()),label="action-label") { Text(it, style = MaterialTheme.typography.titleMedium) } }
 }
 
 @Composable

@@ -3,7 +3,7 @@ android {
  namespace = "com.focus.prototype"
  compileSdk = 35
  buildToolsVersion = "35.0.0"
- defaultConfig { applicationId = "com.focus.prototype"; minSdk = 26; targetSdk = 35; versionCode = 8; versionName = "0.6.0" }
+ defaultConfig { applicationId = "com.focus.prototype"; minSdk = 26; targetSdk = 35; versionCode = 9; versionName = "0.6.1" }
  defaultConfig { testInstrumentationRunner = "com.focus.prototype.BusinessChecks" }
  buildFeatures { compose = true;buildConfig = true }
  testOptions { unitTests.isIncludeAndroidResources = true }

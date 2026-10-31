@@ -3,6 +3,12 @@
 - `com.kizitonwose.calendar:compose:2.6.1` — MIT License. Used for the interactive history calendar.
 - `com.patrykandpatrick.vico:compose-m3:1.16.0` — Apache License 2.0. Used for the real seven-day completion trend chart.
 - `android/compose-samples` (Jetsnack) — studied for Compose design-system organization and component consistency; no source files or assets were copied.
-- `shub39/Grit` — visual reference only. Its GPL-3.0 source was not copied or included.
+- Grit UI source is now adapted under GPL-3.0-or-later; see Grit-PORT.md and the retained file headers.
 
-No source code from Jetsnack or Grit is bundled. Calendar and Vico are runtime dependencies; their license texts are included beside this notice.
+No source code from Jetsnack is bundled. Calendar and Vico are runtime dependencies; their license texts are included beside this notice.
+
+- compose-animations by 2026 skydoves (Jaewoong Eum), Apache-2.0: adapted AnimationExample5 directional counter and AnimationExample11 PlayPauseMorph geometry in Motion.kt. Colors, timing and state bindings changed; no demo business state included.
+- compose-lab by 2026 Dimitris Vlachos, MIT: adapted TypewriterDemo BubbleGrow non-bouncing content-size spring. Other components studied only.
+- Grit TaskCard.kt adapted in GritTaskCard.kt; see Grit-PORT.md.
+
+Motion source revisions: compose-animations https://github.com/skydoves/compose-animations at eb51389891c303a0ad79c73525bd97acfdf96547; compose-lab https://github.com/DimiVlachos/compose-lab at bd43f2e4129592a1de93cb1570548b7b50ad445a.

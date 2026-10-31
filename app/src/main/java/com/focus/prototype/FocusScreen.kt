@@ -20,6 +20,8 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.animation.*
+import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,11 +62,11 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
         phase == "break" || phase == "paused" && pausedFrom == "break" -> 1f - remaining.toFloat() / mode.breakMillis.coerceAtLeast(1L)
         else -> 1f - remaining.toFloat() / mode.workMillis.coerceAtLeast(1L)
     }.coerceIn(0f, 1f)
-    val animatedFraction by animateFloatAsState(fraction, tween(AppMotion.Standard), label = "focus-progress")
+    val animatedFraction by animateFloatAsState(fraction, tween(motionMillis(1000),easing=AppMotion.Ease), label = "focus-progress")
     val running = phase == "work" || phase == "break"
     val activeTask = phase == "work" || phase == "paused" && pausedFrom == "work"
 
-    Column(Modifier.fillMaxWidth().padding(top = AppSpace.Medium, bottom = AppSpace.Large), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.fillMaxWidth().animateContentSize(motionSizeSpec()).padding(top = AppSpace.Medium, bottom = AppSpace.Large), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             PageHeading("专注 · 今日任务", "专注时间")
             StatusPill(if (phase == "work") "正在专注" else if (phase == "break") "正在休息" else "本地计时", active = running)
@@ -133,22 +135,15 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
         }
 
         Spacer(Modifier.height(12.dp))
-        when (phase) {
-            "ready" -> PrimaryAction("开始专注", { selected?.let(timer::begin); onChanged() }, Modifier.fillMaxWidth(), selected != null)
-            "work" -> {
-                PrimaryAction("暂停", { timer.pause(); onChanged() }, Modifier.fillMaxWidth())
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SecondaryAction("休息一下", { timer.takeBreak(); onChanged() }, Modifier.weight(1f))
-                    SecondaryAction("结束", { timer.finish(); onChanged() }, Modifier.weight(1f))
-                }
-            }
-            "break" -> {
-                PrimaryAction("暂停休息", { timer.pause(); onChanged() }, Modifier.fillMaxWidth())
-                SecondaryAction("结束休息", { timer.finish(); onChanged() }, Modifier.fillMaxWidth())
-            }
-            "paused" -> {
-                PrimaryAction("继续", { if(pausedFrom=="break")timer.resumeBreak() else selected?.let(timer::resume); onChanged() }, Modifier.fillMaxWidth(), selected != null || pausedFrom == "break")
-                SecondaryAction("结束本次", { timer.finish(); onChanged() }, Modifier.fillMaxWidth())
+        val morph by animateFloatAsState(if(running) 1f else 0f,tween(motionMillis()),label="play-pause")
+        PrimaryAction(when(phase){"work"->"暂停";"break"->"暂停休息";"paused"->"继续";else->"开始专注"}, {
+            when(phase){"work","break"->timer.pause();"paused"->if(pausedFrom=="break")timer.resumeBreak() else selected?.let(timer::resume);else->selected?.let(timer::begin)}
+            onChanged()
+        },Modifier.fillMaxWidth(),selected!=null || phase=="break" || pausedFrom=="break",icon={PlayPauseMorph(morph)})
+        AnimatedVisibility(phase!="ready",enter=expandVertically(tween(motionMillis()))+fadeIn(),exit=shrinkVertically(tween(motionMillis()))+fadeOut()) {
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                if(phase=="work") SecondaryAction("休息一下",{timer.takeBreak();onChanged()},Modifier.weight(1f))
+                SecondaryAction(if(phase=="break") "结束休息" else "结束本次",{timer.finish();onChanged()},Modifier.weight(1f))
             }
         }
         Spacer(Modifier.height(10.dp))
