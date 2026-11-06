@@ -46,7 +46,7 @@ private data class DayStats(val date: LocalDate, val completed: Int, val total: 
 private enum class GrowthSection(val label: String) { CALENDAR("日历"), TREND("趋势"), MILESTONES("里程碑") }
 
 @Composable
-fun GrowthDetails(db: Database) {
+fun GrowthDetails(db: Database,refreshKey:Int=0,onAllAchievements:()->Unit={}) {
     val today = LocalDate.parse(db.day())
     val history = db.history().toMap()
     var selectedDate by remember(today) { mutableStateOf(today) }
@@ -97,7 +97,7 @@ fun GrowthDetails(db: Database) {
         when (visibleSection) {
             GrowthSection.CALENDAR -> CalendarSection(db, today, history, selectedDate, calendarState, scope) { selectedDate = it }
             GrowthSection.TREND -> TrendSection(db, today)
-            GrowthSection.MILESTONES -> MilestoneSection(db)
+            GrowthSection.MILESTONES -> MilestoneSection(db,refreshKey,onAllAchievements)
         }
     }
 }
@@ -241,35 +241,8 @@ private fun TrendSection(db: Database, today: LocalDate) {
 }
 
 @Composable
-private fun MilestoneSection(db: Database) {
-    val lifetime = db.readableDatabase.rawQuery("SELECT COALESCE(SUM(done),0),COALESCE(SUM(elapsed),0) FROM tasks", null).use { cursor ->
-        cursor.moveToFirst(); cursor.getInt(0) to cursor.getLong(1)
-    }
-    val bestStreak = db.bestStreak()
-    val milestones = listOf(
-        Triple("迈出第一步", lifetime.first.coerceAtMost(1), 1),
-        Triple("十次坚持", lifetime.first.coerceAtMost(10), 10),
-        Triple("一周节奏", bestStreak.coerceAtMost(7), 7),
-        Triple("专注十小时", (lifetime.second / 60000).toInt().coerceAtMost(600), 600),
-    )
-    GritAnalyticsHeader("成长里程碑", icon = R.drawable.grit_flag)
-    QuietSurface {
-        Text("每一步都来自真实的任务与专注记录。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-        milestones.forEachIndexed { index, (title, value, target) ->
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = AppColors.Text)
-                    Text("$value / $target", style = MaterialTheme.typography.labelMedium, color = AppColors.Muted)
-                }
-                androidx.compose.material3.LinearProgressIndicator(
-                    progress = { value.toFloat() / target }, modifier = Modifier.fillMaxWidth().height(5.dp),
-                    color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                )
-            }
-            if (index < milestones.lastIndex) Hairline()
-        }
-    }
-
+private fun MilestoneSection(db: Database,refreshKey:Int,onAllAchievements:()->Unit) {
+    AchievementPreview(db,refreshKey,onAllAchievements)
     GritAnalyticsHeader("计划与例外", icon = R.drawable.grit_calendar)
     QuietSurface {
         val audits = db.readableDatabase.rawQuery("SELECT day,detail FROM audit ORDER BY created DESC LIMIT 12", null)

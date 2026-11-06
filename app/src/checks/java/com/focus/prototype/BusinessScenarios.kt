@@ -11,16 +11,16 @@ val checks=mutableListOf<String>();var now=LocalDateTime.parse("2026-10-30T12:00
   var db=Database(context,name){now}
   fun test(name:String,block:()->Unit){block();checks.add(name)}
   try {
-   test("recurrence, mandatory gate, single base grant") {
+   test("recurrence, per-task mandatory reward, duplicate completion") {
     db.addTask(db.day(),"required",true,0,"行动型","done",20,1,"days:1,3,5")
     db.addTask(db.day(),"optional",false,0,"行动型","done",20,1,"once")
-    db.confirm(db.day(),false,30,1);check(!db.eligible());db.complete(db.tasks().first{it.required});check(db.balance("video")==1800000L);repeat(3){db.grantBase()};check(db.balance("video")==1800000L)
+    db.confirm(db.day(),false,30,1);check(!db.eligible());val required=db.tasks().first{it.required};db.complete(required);check(db.balance("video")==1200000L);db.complete(required);check(db.balance("video")==1200000L)
    }
    test("optional choice idempotency and consumption") {
-    val optional=db.tasks().first{!it.required};db.complete(optional);repeat(3){db.claim(optional,"video")};db.claim(optional,"game");check(db.balance("video")==3000000L);check(db.balance("game")==1L);db.consume("video",60000);check(db.balance("video")==2940000L)
+    val optional=db.tasks().first{!it.required};db.complete(optional);repeat(3){db.claim(optional,"video")};db.claim(optional,"game");check(db.balance("video")==2400000L);check(db.balance("game")==1L);db.consume("video",60000);check(db.balance("video")==2340000L)
    }
    test("reopen preserves completion and balance") {
-    db.close();db=Database(context,name){now};check(db.tasks().count{it.done}==2);check(db.balance("video")==2940000L);db.grantBase();check(db.balance("video")==2940000L)
+    db.close();db=Database(context,name){now};check(db.tasks().count{it.done}==2);check(db.balance("video")==2340000L);db.complete(db.tasks().first{it.required});check(db.balance("video")==2340000L)
    }
    test("midnight and 04 boundary expiration") {
     now=LocalDateTime.parse("2026-10-31T03:59:59");check(db.day()=="2026-10-30");now=now.plusSeconds(1);check(db.day()=="2026-10-31");db.ensure();check(db.balance("video","2026-10-30")==0L);check(db.tasks().isEmpty());check(db.tasks("2026-10-30").all{it.done})
@@ -51,7 +51,7 @@ val checks=mutableListOf<String>();var now=LocalDateTime.parse("2026-10-30T12:00
     val other="focus-clock.db";context.deleteDatabase(other);var mono=100000L;var wall=1_800_000_000_000L;var d=Database(context,other){now};d.addTask(d.day(),"timer",true,0,"行动型","",0,0,"once");val task=d.tasks().single();d.confirm(task.date,false,0,0);var timer=FocusTimer(d,{mono},{wall})
     try{check(timer.mode==FocusMode.POMODORO);timer.begin(task);check(timer.remaining()==25*60_000L);mono+=60_000;wall+=60_000;timer.pause();check(timer.phase=="paused"&&timer.remaining()==24*60_000L);val saved=d.elapsed(d.task(task.id)!!);d.close();d=Database(context,other){now};timer=FocusTimer(d,{mono},{wall});check(timer.phase=="paused"&&timer.remaining()==24*60_000L);timer.resume(d.task(task.id)!!);mono+=30_000;wall+=30_000;timer.takeBreak();check(timer.phase=="break"&&timer.remaining()==5*60_000L);check(d.task(task.id)!!.runningSince==0L);mono+=5*60_000;wall+=5*60_000;check(timer.advance());check(timer.phase=="ready"&&timer.notice=="休息结束，回来继续。");timer.dismissNotice();timer.selectMode(FocusMode.DEEP);timer.begin(d.task(task.id)!!);check(timer.remaining()==50*60_000L);timer.finish();timer.selectMode(FocusMode.FREE);timer.begin(d.task(task.id)!!);mono+=90_000;wall+=90_000;check(timer.elapsed()==90_000L&&formatFocusTime(timer.elapsed())=="01:30");timer.pause();check(timer.elapsed()==90_000L);timer.finish();check(d.elapsed(d.task(task.id)!!) >= saved)}finally{d.close()}
    }
-   test("past rewards cannot be resurrected") {db.grantBase("2026-10-30");check(db.balance("video","2026-10-30")==0L)}
+   test("past rewards cannot be resurrected") {check(db.balance("video","2026-10-30")==0L)}
    test("rest bridges streak, emergency earns nothing, missed day resets") {
     val other="streak-check.db";context.deleteDatabase(other);var clock=LocalDateTime.parse("2026-10-01T12:00:00");Database(context,other){clock}.use{d->
      d.addTask(d.day(),"one",true,0,"行动型","",0,0,"daily");d.confirm(d.day(),false,0,0);d.complete(d.tasks().single());d.planRest("2026-10-02");clock=clock.plusDays(1);d.settleToday();check(d.streak()==1);clock=clock.plusDays(1);d.confirm(d.day(),false,0,0);d.complete(d.tasks().single());check(d.streak()==2);check(d.bestStreak()==2);clock=clock.plusDays(1);d.ensure();d.emergency();check(d.xp()==200);check(d.balance("video")==0L);clock=clock.plusDays(1);check(d.streak()==0)
@@ -66,9 +66,25 @@ val checks=mutableListOf<String>();var now=LocalDateTime.parse("2026-10-30T12:00
     try{d.addTask(d.day(),"repeat",true,0,"行动型","",0,0,"daily");clock=clock.plusDays(4);d.ensure();check(d.tasks("2026-10-02").single().done==false);check(d.tasks("2026-10-04").size==1);check(d.history().count{it.second=="未完成"}==4);repeat(3){d.ensure()};check(d.tasks().size==1)}finally{d.close()}
    }
    test("schema v1 upgrade preserves task history") {
-    val other="migration-check.db";context.deleteDatabase(other);val old=Database(context,other){now};old.addTask(old.day(),"legacy",true,0,"行动型","",0,0,"daily");old.confirm(old.day(),false,5,0);old.complete(old.tasks().single());val sql=old.writableDatabase;val create=sql.rawQuery("SELECT sql FROM sqlite_master WHERE name='tasks'",null).use{it.moveToFirst();it.getString(0)}.replace(Regex(",\\s*template_id TEXT NOT NULL DEFAULT ''"),"");sql.execSQL("ALTER TABLE tasks RENAME TO previous_tasks");sql.execSQL(create);sql.execSQL("INSERT INTO tasks SELECT "+sql.rawQuery("PRAGMA table_info(tasks)",null).use{val cols=mutableListOf<String>();while(it.moveToNext())cols.add(it.getString(1));cols.joinToString(",")}+" FROM previous_tasks");sql.execSQL("DROP TABLE previous_tasks");sql.execSQL("DROP TABLE templates");sql.execSQL("DROP TABLE attachments");sql.version=1;old.close();val upgraded=Database(context,other){now};try{check(upgraded.tasks().single().done);check(upgraded.balance("video")==300000L);check(upgraded.tasks(java.time.LocalDate.parse(upgraded.day()).plusDays(1).toString()).single().title=="legacy")}finally{upgraded.close()}
+    val other="migration-check.db";context.deleteDatabase(other);val old=Database(context,other){now};old.addTask(old.day(),"legacy",true,0,"行动型","",0,0,"daily");old.confirm(old.day(),false,5,0);old.complete(old.tasks().single());val sql=old.writableDatabase;val create=sql.rawQuery("SELECT sql FROM sqlite_master WHERE name='tasks'",null).use{it.moveToFirst();it.getString(0)}.replace(Regex(",\\s*template_id TEXT NOT NULL DEFAULT ''"),"");sql.execSQL("ALTER TABLE tasks RENAME TO previous_tasks");sql.execSQL(create);sql.execSQL("INSERT INTO tasks SELECT "+sql.rawQuery("PRAGMA table_info(tasks)",null).use{val cols=mutableListOf<String>();while(it.moveToNext())cols.add(it.getString(1));cols.joinToString(",")}+" FROM previous_tasks");sql.execSQL("DROP TABLE previous_tasks");sql.execSQL("DROP TABLE templates");sql.execSQL("DROP TABLE attachments");sql.version=1;old.close();val upgraded=Database(context,other){now};try{check(upgraded.tasks().single().done);check(upgraded.balance("video")==0L);check(upgraded.tasks(java.time.LocalDate.parse(upgraded.day()).plusDays(1).toString()).single().title=="legacy")}finally{upgraded.close()}
    }
    test("frozen mandatory deletion cannot unlock after others complete") {val other="change-gate.db";context.deleteDatabase(other);val d=Database(context,other){now};try{val today=d.day();d.addTask(today,"one",true,0,"行动型","",0,0,"once");d.addTask(today,"two",true,0,"行动型","",0,0,"once");d.confirm(today,false,30,0);val deleted=d.tasks().first();d.revise(deleted,deleted.title,deleted.required,0,deleted.mode,deleted.checklist,0,0,"once","mistake",delete=true);d.complete(d.tasks().first());check(!d.eligible());check(d.balance("video")==0L)}finally{d.close()}}
+   test("moving a frozen task preserves an unfinished source and target instance") {
+    val other="move-task.db";context.deleteDatabase(other);val d=Database(context,other){now}
+     try {val sourceDay=d.day();d.addTask(sourceDay,"move me",true,0,"行动型","",10,0,"daily");d.confirm(sourceDay,false,0,0);val source=d.tasks().single();val targetDay=java.time.LocalDate.parse(sourceDay).plusDays(1).toString();val targetId=d.moveTask(source,targetDay,"今天来不及");check(d.tasks(sourceDay).isEmpty());check(!d.tasks(sourceDay,true).single().done);val target=d.tasks(targetDay).single();check(target.id==targetId&&target.title==source.title&&!target.done);check(d.balance("video",sourceDay)==0L);check(d.setting("changed_$sourceDay")=="true");check(!d.eligible(sourceDay))} finally {d.close()}
+   }
+   test("source-aware reward reversal never takes another task reward") {
+    val other="reward-reversal.db";context.deleteDatabase(other);val d=Database(context,other){now}
+    try {val date=d.day();d.addTask(date,"first",true,0,"行动型","",10,0,"once");d.addTask(date,"second",true,0,"行动型","",20,0,"once");d.confirm(date,false,0,0);val tasks=d.tasks();val first=tasks.first{it.title=="first"};val second=tasks.first{it.title=="second"};d.complete(first);d.complete(second);check(d.balance("video")==1800000L);d.consume("video",1500000);check(d.balance("video")==300000L);d.revoke(first);check(d.balance("video")==300000L);d.revoke(second);check(d.balance("video")==0L);check(d.rewardHistory().any{it.contains("奖励冲回 −5 分钟")})} finally {d.close()}
+   }
+   test("manual sleep rules charge once, handle midnight, and correct with a reason") {
+    val other="sleep-rules.db";context.deleteDatabase(other);val d=Database(context,other){now}
+    try {val date=d.day();d.addTask(date,"required",true,0,"行动型","",60,0,"once");d.confirm(date,false,0,0);d.complete(d.tasks().single());check(d.sleepTargets().take(2)==listOf("01:00","07:30"));d.recordSleep(date,"23:30","08:00");check(d.balance("video")==2700000L);d.recordSleep(date,"23:30","08:00");check(d.balance("video")==2700000L);d.recordSleep(date,"01:30","08:00",reason="修正实际就寝时间");check(d.balance("video")==1800000L);d.recordSleep(date,"01:30","08:00",excepted=true,reason="生病例外");check(d.balance("video")==3600000L);check(d.sleepRecord(date)?.excepted==true);check(d.rewardHistory().any{it.contains("睡眠修正返还")})} finally {d.close()}
+   }
+   test("completed legacy mandatory task receives one current-day task reward") {
+    val other="legacy-reward.db";context.deleteDatabase(other);val d=Database(context,other){now}
+     try {val date=d.day();d.addTask(date,"legacy done",true,0,"行动型","",7,0,"once");d.confirm(date,false,0,0);d.writableDatabase.execSQL("UPDATE tasks SET done=1 WHERE title='legacy done'");d.ensure();check(d.balance("video")==420000L);d.ensure();check(d.balance("video")==420000L)} finally {d.close()}
+   }
 return checks
  } finally {db.close()}
 }

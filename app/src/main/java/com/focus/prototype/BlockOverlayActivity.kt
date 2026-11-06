@@ -44,7 +44,9 @@ class BlockOverlayActivity : ComponentActivity() {
     private fun render() {
         val density = resources.displayMetrics.density
         fun dp(value: Int) = (value * density).toInt()
-        val exhausted = db.eligible()
+        val blockedPackage=intent.getStringExtra(EXTRA_BLOCKED_PACKAGE).orEmpty()
+        val exhausted = if(blockedPackage in Store.games) db.balance("game")==0L else db.balance("video")==0L&&db.tasks().any{it.required&&it.done}
+        val nextReward=db.tasks().firstOrNull{it.required&&!it.done&&(if(blockedPackage in Store.games)it.rewardGames>0 else it.rewardMinutes>0)}
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -76,8 +78,13 @@ class BlockOverlayActivity : ComponentActivity() {
         }
 
         panel.addView(label("自律 · 娱乐时间", 12f, 0xffa1a4a7.toInt(), true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(22) })
-        panel.addView(label(if (exhausted) "今日额度已用完" else "先完成今天的任务", 29f, 0xfff1f0ed.toInt(), true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
-        panel.addView(label(if (exhausted) "完成选做任务后，可领取额外视频时间。" else "完成并确认全部必做任务后，即可解锁娱乐时间。", 16f, 0xffa1a4a7.toInt()), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(25) })
+        panel.addView(label(if (exhausted) "娱乐额度已用完" else "先完成一项必做任务", 29f, 0xfff1f0ed.toInt(), true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+        val reason=when {
+            nextReward!=null -> "完成「${nextReward.title}」后，将获得 ${if(blockedPackage in Store.games)"${nextReward.rewardGames} 局游戏奖励" else "${nextReward.rewardMinutes} 分钟视频时间"}。"
+            exhausted -> "完成下一项带有奖励的必做任务后，会继续发放对应额度。"
+            else -> "在今日任务中为必做任务设置娱乐奖励，完成后即可使用。"
+        }
+        panel.addView(label(reason, 16f, 0xffa1a4a7.toInt()), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(25) })
         panel.addView(label("${db.balance("video") / 60000}", 42f, 0xfff1f0ed.toInt()), LinearLayout.LayoutParams(-1, -2))
         panel.addView(label("剩余共享视频分钟", 13f, 0xff74787d.toInt()), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2); bottomMargin = dp(20) })
         button("返回自律 App", true) {
@@ -87,7 +94,6 @@ class BlockOverlayActivity : ComponentActivity() {
         }
         button("紧急解锁", false) {
             db.emergency()
-            val blockedPackage = intent.getStringExtra(EXTRA_BLOCKED_PACKAGE)
             FocusService.overlayDismissed()
             finish()
             blockedPackage?.let { packageManager.getLaunchIntentForPackage(it) }?.let {

@@ -87,7 +87,7 @@ class FocusService : AccessibilityService() {
         val now = SystemClock.elapsedRealtime()
         val elapsed = (now - lastTick).coerceAtLeast(0)
         lastTick = now
-        if (current in Store.videos && current in store.selected && !(current == "tv.danmaku.bili" && db.learningActive()) && db.eligible() && !db.contract().emergency && db.balance("video") > 0 && (screenJustOff || (getSystemService(POWER_SERVICE) as PowerManager).isInteractive && !(getSystemService(KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked)) {
+        if (current in Store.videos && current in store.selected && !(current == "tv.danmaku.bili" && db.learningActive()) && !db.contract().emergency && db.balance("video") > 0 && (screenJustOff || (getSystemService(POWER_SERVICE) as PowerManager).isInteractive && !(getSystemService(KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked)) {
             db.consume("video", elapsed)
         }
     }
@@ -95,7 +95,8 @@ class FocusService : AccessibilityService() {
     private fun enforce() {
         val pkg = current ?: return
         val contract = db.contract()
-        val blocked = !contract.emergency && store.canRestrict(pkg) && !(pkg == "tv.danmaku.bili" && db.learningActive()) && pkg in store.selected && (!db.eligible() || pkg in Store.videos && db.balance("video") <= 0)
+        val noAllowance=when(pkg){in Store.videos->db.balance("video")<=0;in Store.games->db.balance("game")<=0;else->!db.eligible()}
+        val blocked = !contract.emergency && store.canRestrict(pkg) && !(pkg == "tv.danmaku.bili" && db.learningActive()) && pkg in store.selected && noAllowance
         if (blocked) {
             if (!blockActivityShowing) show()
         } else {

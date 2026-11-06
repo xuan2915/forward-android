@@ -26,6 +26,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -105,6 +107,7 @@ internal fun GritTaskListPage(
     onPlan: () -> Unit,
     onSettings: () -> Unit,
     onDetails: (Task) -> Unit,
+    onLongPress: (Task) -> Unit,
 ) {
     val completed = tasks.count(Task::done)
     val filteredTasks = when (filter) {
@@ -171,7 +174,7 @@ internal fun GritTaskListPage(
                         )
                     }
                     itemsIndexed(continuing, key = { _, task -> "continue-${task.id}" }) { index, task ->
-                        GritTaskListCard(task, gritTaskShape(index, continuing.size), onDetails)
+                        GritTaskListCard(task, gritTaskShape(index, continuing.size), onDetails, onLongPress)
                     }
                 }
                 if (filteredTasks.isEmpty()) {
@@ -185,7 +188,7 @@ internal fun GritTaskListPage(
                     }
                 } else {
                     itemsIndexed(filteredTasks, key = { _, task -> task.id }) { index, task ->
-                        GritTaskListCard(task, gritTaskShape(index, filteredTasks.size), onDetails)
+                        GritTaskListCard(task, gritTaskShape(index, filteredTasks.size), onDetails, onLongPress)
                     }
                 }
             }
@@ -212,11 +215,13 @@ private fun GritFilterButton(selected: Boolean, text: String, onClick: () -> Uni
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GritTaskListCard(
     task: Task,
     shape: Shape,
     onDetails: (Task) -> Unit,
+    onLongPress: (Task) -> Unit,
 ) {
     val cardContent by animateColorAsState(
         if (task.done) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSecondaryContainer,
@@ -227,8 +232,7 @@ private fun GritTaskListCard(
         label = "grit-card-background",
     )
     Card(
-        onClick = { onDetails(task) },
-        modifier = Modifier.animateContentSize(),
+        modifier = Modifier.combinedClickable(onClick = { onDetails(task) }, onLongClick = { onLongPress(task) }).animateContentSize(),
         colors = CardDefaults.cardColors(containerColor = cardBackground, contentColor = cardContent),
         shape = shape,
     ) {

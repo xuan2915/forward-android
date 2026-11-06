@@ -58,6 +58,7 @@ fun TaskDetailSheet(
     task: Task,
     db: Database,
     timer: FocusTimer,
+    startEditing: Boolean = false,
     onDismiss: () -> Unit,
     onFocus: () -> Unit,
     onAnalytics: () -> Unit,
@@ -147,7 +148,9 @@ fun TaskDetailSheet(
             }
 
             if (task.done) {
-                if (!task.required && !task.claimed) {
+                if (task.required && (task.rewardMinutes>0 || task.rewardGames>0)) {
+                    Text("本项奖励已自动到账："+buildList{if(task.rewardMinutes>0)add("${task.rewardMinutes} 分钟");if(task.rewardGames>0)add("${task.rewardGames} 局")}.joinToString(" · "),style=MaterialTheme.typography.bodyMedium,color=AppColors.Muted)
+                } else if (!task.required && !task.claimed) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("领取一项奖励", style = MaterialTheme.typography.titleMedium)
                         Text("奖励只能领取一次。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
@@ -155,7 +158,7 @@ fun TaskDetailSheet(
                             if (task.rewardMinutes > 0) SecondaryAction("${task.rewardMinutes} 分钟", { db.claim(task, "video"); onChanged() }, enabled = db.eligible())
                             if (task.rewardGames > 0) SecondaryAction("${task.rewardGames} 局", { db.claim(task, "game"); onChanged() }, enabled = db.eligible())
                         }
-                        if (!db.eligible()) Text("完成全部必做任务后可领取。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                        if (!db.eligible()) Text("完成全部必做任务后，可领取选做奖励。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
                     }
                 } else if (task.claimed) {
                     Text("奖励已领取", style = MaterialTheme.typography.bodyMedium, color = AppColors.Muted)
@@ -200,7 +203,6 @@ fun TaskDetailSheet(
                         Button(enabled = canComplete, onClick = {
                             db.complete(task)
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            db.grantBase(task.date)
                             checking = false
                             onChanged()
                         }, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("确认完成任务") }
@@ -217,7 +219,7 @@ fun TaskDetailSheet(
                 }
 
                 Text("计划调整", style = MaterialTheme.typography.titleMedium)
-                TaskChanges(task, db, onChanged)
+                TaskChanges(task, db, onChanged, startEditing)
             }
         }
     }

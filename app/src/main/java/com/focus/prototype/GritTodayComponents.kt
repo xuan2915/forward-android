@@ -98,7 +98,7 @@ fun GritEntertainmentBanner(
                         !protected -> "应用保护未开启 · 点击前往设置"
                         emergency -> "紧急解锁中 · 可随时恢复保护"
                         unlocked -> "已解锁 · 抖音与 B站共用额度"
-                        else -> "尚未解锁 · 完成必做任务后可用"
+                        else -> "额度已用完 · 完成下一项必做可获得奖励"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = ink.copy(alpha = .82f),
