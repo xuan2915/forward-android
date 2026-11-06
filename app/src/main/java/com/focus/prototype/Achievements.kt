@@ -1,5 +1,13 @@
 package com.focus.prototype
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,6 +22,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -88,19 +97,21 @@ internal fun AchievementsPage(db:Database,refreshKey:Int,onBack:()->Unit) {
 
 @Composable
 private fun AchievementCard(item:Achievement) {
-    QuietSurface(color=MaterialTheme.colorScheme.surfaceContainerLow) {
+    val badgeColor by animateColorAsState(if(item.earned) AppColors.Accent else MaterialTheme.colorScheme.surfaceContainerHighest,label="achievement-badge")
+    val progress by animateIntAsState(item.progress,label="achievement-progress")
+    QuietSurface(Modifier.animateContentSize(),color=MaterialTheme.colorScheme.surfaceContainerLow) {
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-            Surface(Modifier.size(38.dp).clip(CircleShape),color=if(item.earned)AppColors.Accent else MaterialTheme.colorScheme.surfaceContainerHighest,shape=CircleShape) {
-                androidx.compose.foundation.layout.Box(contentAlignment=Alignment.Center){Text(if(item.earned)"✓" else "·",color=if(item.earned)AppColors.AccentInk else AppColors.Muted,style=MaterialTheme.typography.titleMedium)}
+            Surface(Modifier.size(38.dp).clip(CircleShape),color=badgeColor,shape=CircleShape) {
+                androidx.compose.foundation.layout.Box(contentAlignment=Alignment.Center){AnimatedContent(item.earned,transitionSpec={fadeIn(tween(AppMotion.Short)) togetherWith fadeOut(tween(AppMotion.Short))},label="achievement-unlock"){earned->Text(if(earned)"✓" else "·",color=if(earned)AppColors.AccentInk else AppColors.Muted,style=MaterialTheme.typography.titleMedium)}}
             }
             Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
                     Text(item.title,style=MaterialTheme.typography.titleSmall)
-                    Text(if(item.earned)"已获得" else "${item.progress} / ${item.target}",style=MaterialTheme.typography.labelSmall,color=AppColors.Muted)
+                    Text(if(item.earned)"已获得" else "$progress / ${item.target}",style=MaterialTheme.typography.labelSmall,color=AppColors.Muted)
                 }
                 Text(item.condition,style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
                 if(item.earned) Text("获得于 ${item.earnedDate}",style=MaterialTheme.typography.labelSmall,color=AppColors.Muted)
-                else LinearProgressIndicator(progress={item.progress.toFloat()/item.target},modifier=Modifier.fillMaxWidth(),color=AppColors.Accent,trackColor=AppColors.Raised)
+                else LinearProgressIndicator(progress={progress.toFloat()/item.target},modifier=Modifier.fillMaxWidth(),color=AppColors.Accent,trackColor=AppColors.Raised)
             }
         }
     }

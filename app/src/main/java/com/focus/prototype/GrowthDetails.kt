@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -236,19 +237,30 @@ private fun TrendSection(db: Database, today: LocalDate) {
 
 @Composable
 private fun MilestoneSection(db: Database,refreshKey:Int,onAllAchievements:()->Unit) {
+    var selectedAudit by remember { mutableStateOf<String?>(null) }
     AchievementPreview(db,refreshKey,onAllAchievements)
     GritAnalyticsHeader("计划与例外", icon = R.drawable.grit_calendar)
     QuietSurface {
-        val audits = db.readableDatabase.rawQuery("SELECT day,detail FROM audit ORDER BY created DESC LIMIT 12", null)
+        val audits = db.readableDatabase.rawQuery("SELECT day,detail FROM audit WHERE detail LIKE '计划%' OR detail LIKE '任务日期%' OR detail LIKE '接收延期%' OR detail LIKE '紧急解锁%' OR detail='恢复保护' OR detail LIKE '睡眠%' OR detail LIKE '预设休息%' ORDER BY created DESC LIMIT 12", null)
         audits.use { cursor ->
-            if (!cursor.moveToFirst()) Text("计划变更与紧急解锁会显示在这里。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+            if (!cursor.moveToFirst()) Text("任务计划、睡眠例外和应用解锁记录会显示在这里。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
             else do {
                 val day = LocalDate.parse(cursor.getString(0))
-                Text("${day.monthValue}月${day.dayOfMonth}日  ·  ${cursor.getString(1)}", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                val detail=readableAudit(cursor.getString(1))
+                Text("${day.monthValue}月${day.dayOfMonth}日  ·  $detail",modifier=Modifier.fillMaxWidth().clickable{selectedAudit=detail}.padding(vertical=4.dp),maxLines=2,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis,style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
             } while (cursor.moveToNext())
         }
     }
+    selectedAudit?.let { detail -> AlertDialog(onDismissRequest={selectedAudit=null},title={Text("记录详情")},text={Text(detail)},confirmButton={TextButton(onClick={selectedAudit=null}){Text("完成")}}) }
 }
+
+private fun readableAudit(detail:String):String = detail
+    .replace("计划变更：","计划调整：")
+    .replace("必做=true","必做").replace("必做=false","选做")
+    .replace("删除=true","已删除本次任务").replace("删除=false","")
+    .replace("/", " · ")
+    .replace(Regex("\\s+")," ")
+    .trim()
 
 @Composable
 private fun CalendarLegend(color: Color, label: String) {

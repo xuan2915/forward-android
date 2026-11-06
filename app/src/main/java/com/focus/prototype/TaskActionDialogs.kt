@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import java.time.LocalDate
 
 @Composable
@@ -34,7 +35,7 @@ fun TaskActionMenu(
     onDetails:()->Unit,
     onDelete:()->Unit,
 ) {
-    Dialog(onDismissRequest=onDismiss) {
+    Dialog(onDismissRequest=onDismiss, properties=DialogProperties(dismissOnClickOutside=false)) {
         Surface(shape=MaterialTheme.shapes.extraLarge,color=MaterialTheme.colorScheme.surfaceContainerLow) {
             Column(Modifier.fillMaxWidth().padding(20.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
                 Text(task.title,style=MaterialTheme.typography.titleLarge,modifier=Modifier.padding(bottom=8.dp))
@@ -61,15 +62,17 @@ fun TaskMoveDialog(task:Task,db:Database,onDismiss:()->Unit,onMoved:(String)->Un
     val selected=state.selectedDateMillis?.let{LocalDate.ofEpochDay(it/86_400_000L)}
     val reasonRequired=db.contract(task.date).confirmed&&task.required
     var reason by remember(task.id){mutableStateOf("")}
+    var error by remember(task.id){mutableStateOf("")}
     DatePickerDialog(
         onDismissRequest=onDismiss,
-        confirmButton={TextButton(enabled=selected!=null&&selected!=LocalDate.parse(task.date)&&(!reasonRequired||reason.isNotBlank()),onClick={selected?.let{onMoved(db.moveTask(task,it.toString(),reason.trim()))}}){Text("移至此日")} },
+        confirmButton={TextButton(enabled=selected!=null&&selected!=LocalDate.parse(task.date)&&(!reasonRequired||reason.isNotBlank()),onClick={selected?.let{date->runCatching{db.moveTask(task,date.toString(),reason.trim())}.onSuccess(onMoved).onFailure{error=it.message?:"无法调整任务日期。"}}}){Text("移至此日")} },
         dismissButton={TextButton(onClick=onDismiss){Text("取消")}},
     ) {
         Column {
             Text("选择新的任务日期",modifier=Modifier.padding(start=24.dp,top=14.dp),style=MaterialTheme.typography.titleMedium)
             DatePicker(state,showModeToggle=false)
             if(reasonRequired) OutlinedTextField(reason,onValueChange={reason=it},label={Text("计划变更原因")},modifier=Modifier.fillMaxWidth().padding(horizontal=24.dp).padding(bottom=16.dp))
+            if(error.isNotBlank()) Text(error,modifier=Modifier.padding(horizontal=24.dp).padding(bottom=8.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.error)
             Text("延期只会移动未完成任务，不会记为完成或发放奖励。",modifier=Modifier.padding(horizontal=24.dp).padding(bottom=12.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

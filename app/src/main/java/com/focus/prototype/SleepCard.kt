@@ -35,7 +35,8 @@ internal fun SleepCard(db:Database,refreshKey:Int,onChanged:()->Unit) {
     var message by remember(refreshKey){mutableStateOf("")}
     QuietSurface {
         Text("睡眠记录",style=MaterialTheme.typography.titleLarge)
-        Text("目标：${targets[0]} 前就寝 · ${targets[1]} 前起床。这里只使用你手动记录的时间，不会把手机静置当作睡着。",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
+        Text("目标：${targets[0]} 前就寝 · ${targets[1]} 前起床。只按你确认的手动记录结算，不会把手机静置当作睡着。扣减会从之后发放的奖励中抵扣，不追回已使用额度。",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
+        if(db.pendingSleepPenalty()>0) Text("待后续奖励抵扣 ${db.pendingSleepPenalty()/60000} 分钟",style=MaterialTheme.typography.labelMedium,color=AppColors.Accent)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             TimeField("就寝目标",bedTarget,{bedTarget=it},Modifier.weight(1f))
             TimeField("起床目标",wakeTarget,{wakeTarget=it},Modifier.weight(1f))
@@ -61,8 +62,7 @@ internal fun SleepCard(db:Database,refreshKey:Int,onChanged:()->Unit) {
         PrimaryAction(if(saved==null)"保存手动记录" else "更新手动记录",{
             val result=runCatching{db.recordSleep(db.day(),bedtime,wakeTime,exception,reason.trim())}
             message=if(result.isSuccess) {
-                val record=db.sleepRecord()
-                "${if(exception)"例外已保存" else "记录已保存"} · 睡眠扣减 ${((record?.bedtimePenalty?:0)+(record?.wakePenalty?:0))/60000} 分钟"
+                "${if(exception)"例外已保存" else "记录已保存"} · 待后续奖励抵扣 ${db.pendingSleepPenalty()/60000} 分钟"
             } else "请检查时间格式；修改记录或设置例外时需要填写原因。"
             if(result.isSuccess)onChanged()
         },Modifier.fillMaxWidth())

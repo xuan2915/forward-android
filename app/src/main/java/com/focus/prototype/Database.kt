@@ -13,6 +13,7 @@ import java.util.UUID
 data class Task(val id: String, val date: String, val title: String, val required: Boolean, val minutes: Int, val mode: String, val checklist: String, val rewardMinutes: Int, val rewardGames: Int, val elapsed: Long, val runningSince: Long, val bootTime: Long, val evidence: String, val done: Boolean, val claimed: Boolean)
 data class Contract(val date: String, val confirmed: Boolean, val rest: Boolean, val baseMinutes: Int, val baseGames: Int, val baseClaimed: Boolean, val emergency: Boolean)
 data class SleepRecord(val date:String,val bedtime:String,val wakeTime:String,val bedtimePenalty:Long,val wakePenalty:Long,val excepted:Boolean,val reason:String)
+data class RewardSnapshot(val earned:Long,val used:Long,val sleepDeducted:Long,val expired:Long,val reversed:Long,val remaining:Long)
 
 class Database(context: Context, name:String = "journey.db", private val now:()->LocalDateTime = { LocalDateTime.now() }) : SQLiteOpenHelper(context, name, null, 4), java.io.Closeable {
  override fun onCreate(db: SQLiteDatabase) {
@@ -134,6 +135,28 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
  private fun ledger(db: SQLiteDatabase, day: String, task: String, kind: String, amount: Long) = ledgerAt(db,day,task,kind,amount,System.currentTimeMillis())
  private fun ledgerAt(db: SQLiteDatabase, day: String, task: String, kind: String, amount: Long,created:Long) { db.insertOrThrow("ledger", null, cv("id" to UUID.randomUUID().toString(),"day" to day,"task_id" to task,"kind" to kind,"amount" to amount,"created" to created)) }
  private fun allocationKind(kind:String)="${kind}_allocation"
+ private fun pendingSleepKey(date:String,source:String)="sleep_pending_${date}_$source"
+ private fun grantReward(db:SQLiteDatabase,date:String,source:String,kind:String,amount:Long) {
+  if(amount<=0)return
+  ledger(db,date,source,kind,amount)
+  if(kind!="video")return
+  var available=amount
+  val pending=mutableListOf<Triple<String,String,Long>>()
+  db.rawQuery("SELECT key,value FROM settings WHERE key GLOB 'sleep_pending_*' AND CAST(value AS INTEGER)>0",null).use { c ->
+   while(c.moveToNext()) {
+    val key=c.getString(0);val parts=key.removePrefix("sleep_pending_").split('_')
+    if(parts.size>=2)pending.add(Triple(parts.dropLast(1).joinToString("_"),parts.last(),c.getString(1).toLong()))
+   }
+  }
+  pending.sortedWith(compareBy<Triple<String,String,Long>>{it.first}.thenBy{it.second}).forEach { (sleepDate,sourceType,amountDue) ->
+   if(available<=0)return@forEach
+   val charged=minOf(available,amountDue);val at=System.currentTimeMillis()
+   appendDebit(db,date,"sleep:$sourceType:$sleepDate",kind,charged,at)
+   appendDebit(db,date,source,allocationKind(kind),charged,at)
+   setSetting(pendingSleepKey(sleepDate,sourceType),(amountDue-charged).toString())
+   available-=charged
+  }
+ }
  private fun appendDebit(db:SQLiteDatabase,day:String,source:String,kind:String,amount:Long,at:Long) {
   val previous=db.rawQuery("SELECT id,amount,created FROM ledger WHERE day=? AND task_id=? AND kind=? ORDER BY created DESC,rowid DESC LIMIT 1",arrayOf(day,source,kind)).use{if(it.moveToFirst())Triple(it.getString(0),it.getLong(1),it.getLong(2))else null}
   if(previous!=null&&at-previous.third<60_000)db.update("ledger",cv("amount" to previous.second-amount,"created" to at),"id=?",arrayOf(previous.first)) else ledgerAt(db,day,source,kind,-amount,at)
@@ -158,8 +181,18 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
   setSetting(marker,"true")
  }
  fun balance(kind: String, day: String = rewardDay()): Long = readableDatabase.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND kind=?",arrayOf(day,kind)).use { it.moveToFirst(); it.getLong(0).coerceAtLeast(0) }
+ fun rewardSnapshot(kind:String,day:String=rewardDay()):RewardSnapshot {
+  fun total(where:String)=readableDatabase.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND kind=? AND $where",arrayOf(day,kind)).use{it.moveToFirst();it.getLong(0)}
+  return RewardSnapshot(
+   total("amount>0 AND task_id NOT LIKE 'sleep-refund:%'"),
+   -total("task_id='usage' AND amount<0"),
+   -total("task_id LIKE 'sleep:%' AND amount<0"),
+   -total("task_id='expiry' AND amount<0"),
+   -total("task_id LIKE 'revoke:%' AND amount<0"),balance(kind,day),
+  )
+ }
  fun consume(kind: String, amount: Long, day: String = rewardDay()) { val db = writableDatabase; db.beginTransaction(); try { allocateLegacySpending(db,day,kind);val actual = minOf(balance(kind,day),amount.coerceAtLeast(0)); if(actual > 0) {val created=System.currentTimeMillis();appendDebit(db,day,"usage",kind,actual,created);allocateSpend(db,day,kind,actual,created)}; db.setTransactionSuccessful() } finally { db.endTransaction() } }
- fun claim(task: Task, kind: String) { val db = writableDatabase; db.beginTransaction(); try { val fresh = tasks(task.date).first { it.id == task.id }; if (eligible(task.date) && !fresh.required && fresh.done && !fresh.claimed && task.date == day()) { val amount = if(kind == "video") fresh.rewardMinutes * 60000L else fresh.rewardGames.toLong(); require(amount > 0); ledger(db,rewardDay(),task.id,kind,amount); db.update("tasks",cv("claimed" to true),"id=?",arrayOf(task.id)) }; db.setTransactionSuccessful() } finally { db.endTransaction() } }
+ fun claim(task: Task, kind: String) { val db = writableDatabase; db.beginTransaction(); try { val fresh = tasks(task.date).first { it.id == task.id }; if (eligible(task.date) && !fresh.required && fresh.done && !fresh.claimed && task.date == day()) { val amount = if(kind == "video") fresh.rewardMinutes * 60000L else fresh.rewardGames.toLong(); require(amount > 0); grantReward(db,rewardDay(),task.id,kind,amount); db.update("tasks",cv("claimed" to true),"id=?",arrayOf(task.id)) }; db.setTransactionSuccessful() } finally { db.endTransaction() } }
  fun start(task: Task) { val fresh=tasks(task.date).first{it.id==task.id};if(fresh.done || fresh.runningSince != 0L) return; runningTasks().forEach{pause(it)};writableDatabase.update("tasks",cv("running_since" to SystemClock.elapsedRealtime(),"boot_time" to (System.currentTimeMillis()-SystemClock.elapsedRealtime())),"id=?",arrayOf(task.id)) }
  fun elapsed(task: Task): Long { val sameBoot = kotlin.math.abs((System.currentTimeMillis()-SystemClock.elapsedRealtime()) - task.bootTime) < 120000; return task.elapsed + if(task.runningSince > 0 && sameBoot) (SystemClock.elapsedRealtime()-task.runningSince).coerceAtLeast(0) else 0 }
  fun pause(task: Task) { val fresh=tasks(task.date).first{it.id==task.id};if(fresh.runningSince==0L)return;writableDatabase.update("tasks",cv("elapsed" to elapsed(fresh),"running_since" to 0L,"boot_time" to 0L),"id=?",arrayOf(task.id)) }
@@ -179,7 +212,7 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
    if(task.date==day() && fresh.required) {
     listOf("video" to fresh.rewardMinutes.toLong()*60000L,"game" to fresh.rewardGames.toLong()).forEach { (kind,amount) ->
      val key="task_reward_${fresh.id}_$kind"
-     if(amount>0 && setting(key)!="true") { ledger(db,rewardDay(),fresh.id,kind,amount);setSetting(key,"true") }
+     if(amount>0 && setting(key)!="true") { grantReward(db,rewardDay(),fresh.id,kind,amount);setSetting(key,"true") }
     }
    }
    db.setTransactionSuccessful()
@@ -191,26 +224,29 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
   try {
    val fresh=tasks(task.date).first{it.id==task.id};val frozen=contract(task.date).confirmed
    require(!fresh.done && (!frozen || reason.isNotBlank()))
-   if(frozen) {audit(task.date,"计划删除：${fresh.title}；原因：${reason.trim()}");setSetting("changed_${task.date}","true");if(fresh.required)setSetting("gate_changed_${task.date}","true")}
+   if(frozen) {audit(task.date,"计划删除：${fresh.title}（${if(fresh.required)"必做" else "选做"}，${fresh.minutes} 分钟，完成标准：${fresh.checklist.ifBlank { "未填写" }}）；原因：${reason.trim()}");setSetting("changed_${task.date}","true");if(fresh.required)setSetting("gate_changed_${task.date}","true")}
    setSetting("deleted_${task.id}", "true")
    db.delete("attachments","task_id=?",arrayOf(task.id));db.delete("tasks","id=?",arrayOf(task.id));db.setTransactionSuccessful()
   } finally {db.endTransaction()}
  }
  fun moveTask(task:Task,targetDay:String,reason:String=""):String {
   require(targetDay>=day() && targetDay!=task.date)
-  pause(task)
   val db=writableDatabase;db.beginTransaction()
   return try {
    val fresh=tasks(task.date).first{it.id==task.id};val frozen=contract(task.date).confirmed
    require(!fresh.done && !contract(targetDay).confirmed && (!frozen || !fresh.required || reason.isNotBlank()))
    val source=db.rawQuery("SELECT template_id,recurrence,origin FROM tasks WHERE id=?",arrayOf(task.id)).use{it.moveToFirst();Triple(it.getString(0),it.getString(1),it.getString(2))}
-   val reusableTarget=if(source.first.isBlank())null else db.rawQuery("SELECT id FROM tasks WHERE template_id=? AND day=? AND done=0 AND elapsed=0 AND running_since=0 AND evidence='' AND id NOT IN (SELECT source_id FROM task_moves) LIMIT 1",arrayOf(source.first,targetDay)).use{if(it.moveToFirst())it.getString(0)else null}
+   val duplicate=db.rawQuery("SELECT id,template_id,done,elapsed,running_since,evidence,claimed FROM tasks WHERE day=? AND id NOT IN (SELECT source_id FROM task_moves) AND (template_id=? OR lower(trim(title))=lower(trim(?))) LIMIT 1",arrayOf(targetDay,source.first,fresh.title)).use { c -> if(c.moveToFirst()) listOf(c.getString(0),c.getString(1),c.getInt(2).toString(),c.getLong(3).toString(),c.getLong(4).toString(),c.getString(5),c.getInt(6).toString()) else null }
+   if(duplicate!=null) require(duplicate[1]==source.first && duplicate[2]=="0" && duplicate[3]=="0" && duplicate[4]=="0" && duplicate[5].isBlank() && duplicate[6]=="0") { "目标日期已有同一任务或同名任务，且已有进度，不能重复迁入。" }
+   pause(fresh)
+   val reusableTarget=duplicate?.get(0)
    val targetId=reusableTarget?:UUID.randomUUID().toString()
    val targetValues=cv("title" to fresh.title,"required" to fresh.required,"minutes" to fresh.minutes,"mode" to fresh.mode,"checklist" to fresh.checklist,"reward_minutes" to fresh.rewardMinutes,"reward_games" to fresh.rewardGames,"elapsed" to fresh.elapsed,"running_since" to 0L,"boot_time" to 0L,"evidence" to fresh.evidence,"done" to false,"claimed" to false,"recurrence" to source.second,"origin" to source.third)
    if(reusableTarget!=null)db.update("tasks",targetValues,"id=?",arrayOf(targetId)) else db.insertOrThrow("tasks",null,targetValues.apply{put("id",targetId);put("template_id",source.first);put("day",targetDay)})
    db.insertOrThrow("task_moves",null,cv("source_id" to task.id,"target_id" to targetId,"from_day" to task.date,"to_day" to targetDay,"created" to System.currentTimeMillis()))
-   db.update("attachments",cv("task_id" to targetId),"task_id=?",arrayOf(task.id))
-   if(frozen){audit(task.date,"任务延期：${fresh.title} → $targetDay"+(if(reason.isBlank())"" else "；原因：$reason"));setSetting("changed_${task.date}","true")}
+   db.rawQuery("SELECT path,created FROM attachments WHERE task_id=?",arrayOf(task.id)).use { c -> while(c.moveToNext())db.insertOrThrow("attachments",null,cv("id" to UUID.randomUUID().toString(),"task_id" to targetId,"path" to c.getString(0),"created" to c.getLong(1))) }
+   audit(task.date,"任务日期调整：${fresh.title}，${task.date} → $targetDay"+(if(reason.isBlank())"" else "；原因：$reason"))
+   if(frozen){setSetting("changed_${task.date}","true");if(fresh.required)setSetting("gate_changed_${task.date}","true")}
    audit(targetDay,"接收延期任务：${fresh.title}（来自 ${task.date}）")
    db.setTransactionSuccessful();targetId
   } finally {db.endTransaction()}
@@ -227,7 +263,7 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
  }
  fun revise(task:Task,title:String,required:Boolean,minutes:Int,mode:String,checklist:String,video:Int,games:Int,recurrence:String,reason:String,delete:Boolean=false,applyFuture:Boolean=false) {
   val db=writableDatabase; db.beginTransaction()
-  try { val frozen=contract(task.date).confirmed; require(!task.done && title.isNotBlank() && (!frozen || reason.isNotBlank())); if(frozen) { audit(task.date,"计划变更：${task.title} / 必做=${task.required} / ${task.minutes}分钟 / ${task.mode} / ${task.checklist} → $title / 必做=$required / $minutes 分钟 / $mode / $checklist / 删除=$delete；原因：$reason"); setSetting("changed_${task.date}","true") }
+  try { val frozen=contract(task.date).confirmed; require(!task.done && title.isNotBlank() && (!frozen || reason.isNotBlank())); if(frozen) { audit(task.date,"计划变更：${task.title}（${if(task.required)"必做" else "选做"}，${task.minutes} 分钟，完成标准：${task.checklist.ifBlank { "未填写" }}）→ ${if(delete)"删除" else "$title（${if(required)"必做" else "选做"}，$minutes 分钟，完成标准：${checklist.ifBlank { "未填写" }}）"}；原因：${reason.trim()}"); setSetting("changed_${task.date}","true") }
    if(frozen && task.required && (delete || !required))setSetting("gate_changed_${task.date}","true")
    val templateId=db.rawQuery("SELECT template_id FROM tasks WHERE id=?",arrayOf(task.id)).use {it.moveToFirst();it.getString(0)}
    if(applyFuture && templateId.isNotBlank()) {
@@ -243,13 +279,16 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
  fun editDraft(task: Task, title:String, minutes:Int, checklist:String) { require(!contract(task.date).confirmed && !task.done && title.isNotBlank()); writableDatabase.update("tasks",cv("title" to title.trim(),"minutes" to minutes,"checklist" to checklist),"id=?",arrayOf(task.id)) }
  fun recurrence(task:Task):String = readableDatabase.rawQuery("SELECT recurrence FROM tasks WHERE id=?",arrayOf(task.id)).use {if(it.moveToFirst())it.getString(0) else "once"}
  fun rewardHistory(): List<String> {
-  val out=mutableListOf<String>()
+   val out=mutableListOf<Pair<Long,String>>()
   readableDatabase.rawQuery("SELECT l.day,l.kind,l.amount,l.task_id,l.created,t.title FROM ledger l LEFT JOIN tasks t ON t.id=l.task_id WHERE l.amount<>0 AND l.kind NOT LIKE '%_allocation' ORDER BY l.created DESC,l.rowid DESC LIMIT 100",null).use {c->while(c.moveToNext()) {
    val amount=c.getLong(2);val source=c.getString(3);val eventTime=java.time.Instant.ofEpochMilli(c.getLong(4)).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime();val absolute=kotlin.math.abs(amount);val value=if(c.getString(1)=="video") {val minutes=absolute/60000;val seconds=absolute%60000/1000;when{minutes==0L->"${seconds.coerceAtLeast(1)} 秒";seconds==0L->"$minutes 分钟";else->"$minutes 分 $seconds 秒"}} else "${absolute} 局"
-   val label=when{source=="expiry"->"额度到期 −$value";source=="usage"->"已使用 $value";source.startsWith("sleep:")->"睡眠规则扣减 −$value";source.startsWith("sleep-refund:")->"睡眠修正返还 +$value";amount<0->"奖励冲回 −$value";source=="base"->"历史基础奖励 +$value";else->"${if(readableDatabase.rawQuery("SELECT required FROM tasks WHERE id=?",arrayOf(source)).use{it.moveToFirst()&&it.getInt(0)!=0})"必做奖励" else "选做奖励"} · ${c.getString(5)?:"历史任务"} +$value"}
-   val time=eventTime.toLocalTime().toString().take(5);out.add("${eventTime.monthValue}月${eventTime.dayOfMonth}日 $time · $label")
+    val title=c.getString(5);val label=when{source=="expiry"->"奖励到期 −$value";source=="usage"->"已使用 $value";source.startsWith("sleep:")->"睡眠规则抵扣 −$value";source.startsWith("sleep-refund:")->"睡眠记录修正返还 +$value";source.startsWith("revoke:")||amount<0->"任务奖励冲回 −$value";source=="base"->"基础奖励 +$value";else->"${if(readableDatabase.rawQuery("SELECT required FROM tasks WHERE id=?",arrayOf(source)).use{it.moveToFirst()&&it.getInt(0)!=0})"必做奖励" else "选做奖励"} · ${title?:"历史任务"} +$value"}
+    val time=eventTime.toLocalTime().toString().take(5);out.add(c.getLong(4) to "${eventTime.monthValue}月${eventTime.dayOfMonth}日 $time · $label")
   } }
-  return out
+   readableDatabase.rawQuery("SELECT day,detail,created FROM audit WHERE detail LIKE '紧急解锁%' OR detail='恢复保护' ORDER BY created DESC LIMIT 30",null).use { c -> while(c.moveToNext()) {
+    val eventTime=java.time.Instant.ofEpochMilli(c.getLong(2)).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime();val detail=c.getString(1);val why=detail.removePrefix("紧急解锁").trimStart('：');val label=if(detail.startsWith("紧急解锁"))"应用紧急解锁${if(why.isBlank())"" else "：$why"}" else "应用保护已恢复";out.add(c.getLong(2) to "${eventTime.monthValue}月${eventTime.dayOfMonth}日 ${eventTime.toLocalTime().toString().take(5)} · $label")
+   } }
+   return out.sortedByDescending{it.first}.take(100).map{it.second}
  }
  fun revoke(task: Task) {
   val db = writableDatabase; db.beginTransaction()
@@ -281,6 +320,7 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
   val json=setting("sleep_record_$date");if(json.isBlank())return null
   val o=org.json.JSONObject(json);return SleepRecord(date,o.getString("bedtime"),o.getString("wake"),o.getLong("bed_penalty"),o.getLong("wake_penalty"),o.getBoolean("excepted"),o.optString("reason"))
  }
+ fun pendingSleepPenalty():Long = readableDatabase.rawQuery("SELECT COALESCE(SUM(CAST(value AS INTEGER)),0) FROM settings WHERE key GLOB 'sleep_pending_*'",null).use{it.moveToFirst();it.getLong(0)}
  fun recordSleep(date:String,bedtime:String,wake:String,excepted:Boolean=false,reason:String="") {
   val bed=java.time.LocalTime.parse(bedtime);val woke=java.time.LocalTime.parse(wake);val old=sleepRecord(date)
   require(date==day() && (!excepted||reason.isNotBlank()) && (old==null || old.bedtime==bedtime&&old.wakeTime==wake&&old.excepted==excepted || reason.isNotBlank()))
@@ -290,18 +330,24 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
   val desiredWake=if(!excepted&&woke.isAfter(wakeTarget))targets[3].toLong()*60000 else 0L
   val db=writableDatabase;db.beginTransaction()
   try {
-   val rewardDate=old?.let{org.json.JSONObject(setting("sleep_record_$date")).optString("reward_day",date)}?:rewardDay()
-   fun reconcile(kind:String,oldAmount:Long,newAmount:Long,source:String):Long {
+   fun reconcile(source:String,oldAmount:Long,newAmount:Long):Long {
+    val key=pendingSleepKey(date,source);val pendingBefore=setting(key,"0").toLongOrNull()?:0L
     val delta=newAmount-oldAmount
-    if(delta>0){val charged=minOf(balance(kind,rewardDate),delta);if(charged>0){val at=System.currentTimeMillis();ledgerAt(db,rewardDate,"sleep:$source:$date",kind,-charged,at);allocateSpend(db,rewardDate,kind,charged,at)};return oldAmount+charged}
-    if(delta<0){val refund=minOf(oldAmount,-delta);if(refund>0)ledger(db,rewardDate,"sleep-refund:$source:$date:${System.currentTimeMillis()}",kind,refund);return oldAmount-refund}
-    return oldAmount
+    val pendingAfter=if(delta>=0) pendingBefore+delta else (pendingBefore+delta).coerceAtLeast(0)
+    setSetting(key,pendingAfter.toString())
+    val reduceApplied=if(delta<0)(-delta-pendingBefore).coerceAtLeast(0) else 0
+    if(reduceApplied>0) {
+     ledger(db,rewardDay(),"sleep-refund:$source:$date", "video",reduceApplied)
+    }
+    return newAmount
    }
-   val bedApplied=reconcile("video",old?.bedtimePenalty?:0,desiredBed,"bedtime")
-   val wakeApplied=reconcile("video",old?.wakePenalty?:0,desiredWake,"wake")
-   val record=org.json.JSONObject().put("bedtime",bedtime).put("wake",wake).put("bed_penalty",bedApplied).put("wake_penalty",wakeApplied).put("excepted",excepted).put("reason",reason.trim()).put("reward_day",rewardDate)
+   val bedPenalty=reconcile("bedtime",old?.bedtimePenalty?:0,desiredBed)
+   val wakePenalty=reconcile("wake",old?.wakePenalty?:0,desiredWake)
+   val pending=pendingSleepPenalty()
+   val record=org.json.JSONObject().put("bedtime",bedtime).put("wake",wake).put("bed_penalty",bedPenalty).put("wake_penalty",wakePenalty).put("excepted",excepted).put("reason",reason.trim())
    setSetting("sleep_record_$date",record.toString())
-   val detail=if(excepted) "睡眠例外：${reason.trim()}" else "手动睡眠记录：就寝 $bedtime，起床 $wake；扣减 ${(bedApplied+wakeApplied)/60000} 分钟"+(if(old!=null)"；修正原因：${reason.trim()}" else "")
+   val detail=if(excepted) "睡眠例外：${reason.trim()}" else "手动睡眠记录：就寝 $bedtime，起床 $wake；待后续奖励发放扣减 ${(bedPenalty+wakePenalty)/60000} 分钟"+(if(old!=null)"；修正原因：${reason.trim()}" else "")
+   if(pending>0)audit(date,"睡眠扣减待下次奖励抵扣：${pending/60000} 分钟")
    audit(date,detail);db.setTransactionSuccessful()
   } finally {db.endTransaction()}
  }
@@ -312,7 +358,7 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
     val task=c.task()
     listOf("video" to task.rewardMinutes.toLong()*60000L,"game" to task.rewardGames.toLong()).forEach{(kind,amount)->
      val key="task_reward_${task.id}_$kind"
-     if(amount>0&&setting(key)!="true") {ledger(db,rewardDay(),task.id,kind,amount);setSetting(key,"true")}
+     if(amount>0&&setting(key)!="true") {grantReward(db,rewardDay(),task.id,kind,amount);setSetting(key,"true")}
     }
    }};if(ownsTransaction)db.setTransactionSuccessful()
   } finally {if(ownsTransaction)db.endTransaction()}

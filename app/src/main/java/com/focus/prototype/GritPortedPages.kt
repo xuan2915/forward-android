@@ -66,6 +66,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -223,6 +224,11 @@ private fun GritTaskListCard(
     onDetails: (Task) -> Unit,
     onLongPress: (Task) -> Unit,
 ) {
+    val currentTask = rememberUpdatedState(task)
+    val currentOnDetails = rememberUpdatedState(onDetails)
+    val currentOnLongPress = rememberUpdatedState(onLongPress)
+    val onCardClick = remember { { currentOnDetails.value(currentTask.value) } }
+    val onCardLongClick = remember { { currentOnLongPress.value(currentTask.value) } }
     val cardContent by animateColorAsState(
         if (task.done) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSecondaryContainer,
         label = "grit-card-content",
@@ -232,7 +238,7 @@ private fun GritTaskListCard(
         label = "grit-card-background",
     )
     Card(
-        modifier = Modifier.combinedClickable(onClick = { onDetails(task) }, onLongClick = { onLongPress(task) }).animateContentSize(),
+        modifier = Modifier.combinedClickable(onClick = onCardClick, onLongClick = onCardLongClick).animateContentSize(),
         colors = CardDefaults.cardColors(containerColor = cardBackground, contentColor = cardContent),
         shape = shape,
     ) {
