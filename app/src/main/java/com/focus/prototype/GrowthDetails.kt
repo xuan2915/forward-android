@@ -179,12 +179,6 @@ private fun CalendarSection(
             }
             if (index < selectedTasks.lastIndex) Hairline()
         }
-        val review = if (selectedState != null) db.readReview(selectedDate.toString()).filter { it.isNotBlank() } else emptyList()
-        if (review.isNotEmpty()) {
-            Hairline()
-            Text("当日总结", style = MaterialTheme.typography.labelLarge, color = AppColors.Muted)
-            review.forEach { Text(it, style = MaterialTheme.typography.bodyMedium, color = AppColors.Text) }
-        }
     }
 }
 

@@ -22,8 +22,18 @@ val checks=mutableListOf<String>();var now=LocalDateTime.parse("2026-10-30T12:00
    test("reopen preserves completion and balance") {
     db.close();db=Database(context,name){now};check(db.tasks().count{it.done}==2);check(db.balance("video")==2340000L);db.complete(db.tasks().first{it.required});check(db.balance("video")==2340000L)
    }
-   test("midnight and 04 boundary expiration") {
-    now=LocalDateTime.parse("2026-10-31T03:59:59");check(db.day()=="2026-10-30");now=now.plusSeconds(1);check(db.day()=="2026-10-31");db.ensure();check(db.balance("video","2026-10-30")==0L);check(db.tasks().isEmpty());check(db.tasks("2026-10-30").all{it.done})
+   test("tasks roll at midnight while reward balance lasts until 04") {
+    val other="separate-day-boundaries.db";context.deleteDatabase(other);var clock=LocalDateTime.parse("2026-10-30T23:50:00");val d=Database(context,other){clock}
+    try {
+     val firstDay=d.day();d.addTask(firstDay,"before midnight",true,0,"行动型","",10,0,"once");d.confirm(firstDay,false,0,0);d.complete(d.tasks().single());check(d.balance("video")==600000L)
+     clock=LocalDateTime.parse("2026-10-31T00:01:00");check(d.day()=="2026-10-31"&&d.rewardDay()=="2026-10-30");check(d.tasks().isEmpty());check(d.balance("video")==600000L)
+     d.addTask(d.day(),"after midnight",true,0,"行动型","",5,0,"once");d.confirm(d.day(),false,0,0);d.complete(d.tasks().single());check(d.balance("video")==900000L)
+     clock=LocalDateTime.parse("2026-10-31T04:00:00");d.ensure();check(d.rewardDay()=="2026-10-31");check(d.balance("video")==0L)
+     d.addTask(d.day(),"after reset",false,0,"行动型","",7,0,"once");val afterReset=d.tasks().first{it.title=="after reset"};d.complete(afterReset);d.claim(afterReset,"video");check(d.balance("video")==420000L)
+    } finally {d.close()}
+   }
+   test("daily tasks and reward expiry at their separate boundaries") {
+    now=LocalDateTime.parse("2026-10-31T03:59:59");check(db.day()=="2026-10-31");check(db.rewardDay()=="2026-10-30");now=now.plusSeconds(1);check(db.day()=="2026-10-31");check(db.rewardDay()=="2026-10-31");db.ensure();check(db.balance("video","2026-10-30")==0L);check(db.tasks().isEmpty());check(db.tasks("2026-10-30").all{it.done})
    }
    test("weekday generates once, template edit preserves history") {
     now=LocalDateTime.parse("2026-11-02T12:00:00");check(db.tasks().single().title=="required");db.ensure();check(db.tasks().size==1);val task=db.tasks().single();db.revise(task,"updated",true,0,"行动型","new",10,1,"daily","",applyFuture=true);check(db.tasks("2026-10-30").first{it.required}.title=="required");check(db.tasks("2026-11-03").single().title=="updated")
@@ -35,7 +45,7 @@ val checks=mutableListOf<String>();var now=LocalDateTime.parse("2026-10-30T12:00
     db.planRest("2026-11-04");check(db.contract("2026-11-04").rest);check(db.tasks("2026-11-04").none{it.required})
    }
    test("boundary change is deferred") {
-    val before=db.day();db.scheduleBoundary(6);check(db.day()==before);now=LocalDateTime.parse("2026-11-03T05:59:59");check(db.day()=="2026-11-02");now=now.plusSeconds(1);check(db.day()=="2026-11-03")
+    val before=db.day();val rewardBefore=db.rewardDay();db.scheduleBoundary(6);check(db.day()==before&&db.rewardDay()==rewardBefore);now=LocalDateTime.parse("2026-11-03T05:59:59");check(db.rewardDay()=="2026-11-02");now=now.plusSeconds(1);check(db.rewardDay()=="2026-11-03")
    }
    test("proof, review, backup restore, repeat restore") {
     val date=db.day();db.addTask(date,"proof",false,0,"成果型","photo",5,1,"once");val task=db.tasks().first{it.title=="proof"};val file=File(context.filesDir,"evidence/proof.txt");file.parentFile!!.mkdirs();file.writeText("evidence bytes");db.evidence(task,file.absolutePath);db.review(date,"problem","praise","note");Store(context).selected=setOf("tv.danmaku.bili");val saved=Backup.export(context,db);db.setSetting("extra","x");repeat(2){Backup.restore(context,db,saved)};check(db.setting("extra")=="");check(db.readReview(date)==listOf("problem","praise","note"));val proof=db.tasks().first{it.title=="proof"};check(File(proof.evidence).readText()=="evidence bytes");check(Store(context).selected==setOf("tv.danmaku.bili"))

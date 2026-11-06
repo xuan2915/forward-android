@@ -34,5 +34,5 @@ import androidx.compose.ui.unit.dp
 
 @Composable fun DaySettings(db:Database,onChanged:()->Unit) {
  var hour by remember { mutableStateOf(db.setting("boundary","4")) }
- Column { Text("一天从几点开始"); OutlinedTextField(hour,onValueChange={hour=it.filter(Char::isDigit).take(2)},label={Text("0–23 点，默认 4 点")}); Button(enabled=(hour.toIntOrNull()?:-1) in 0..23,onClick={db.scheduleBoundary(hour.toInt());onChanged()}){Text("从下一个自律日生效")}; val pending=db.setting("boundary_effective"); if(pending.isNotBlank()) Text("生效时间：$pending；历史日期与奖励不会重新结算。") }
+ Column { Text("任务每天 0 点更新；娱乐额度默认凌晨 4 点重置。"); OutlinedTextField(hour,onValueChange={hour=it.filter(Char::isDigit).take(2)},label={Text("额度重置时间（0–23 点）")}); Button(enabled=(hour.toIntOrNull()?:-1) in 0..23,onClick={db.scheduleBoundary(hour.toInt());onChanged()}){Text("设置额度重置时间")}; val pending=db.setting("boundary_effective"); if(pending.isNotBlank()) Text("生效时间：$pending；历史任务与奖励不会重新结算。") }
 }

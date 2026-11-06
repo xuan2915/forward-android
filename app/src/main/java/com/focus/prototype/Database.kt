@@ -61,9 +61,17 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
   val db=writableDatabase; db.beginTransaction()
   try { require(!contract(target).confirmed); val existing=tasks(target).map { it.title }.toSet(); drafts.filter { it.title !in existing }.forEach { addTask(target,it.title,it.required,0,"行动型","按计划完成并自检",20,1,"once") }; setSetting("import_draft",""); audit(target,"从文本导入 ${drafts.size} 项待确认任务"); db.setTransactionSuccessful() } finally { db.endTransaction() }
  }
- fun day(): String {
-  val now = now(); val boundary = setting("boundary", "4").toIntOrNull()?.coerceIn(0, 23) ?: 4
-  val pending=setting("boundary_effective"); if(pending.isNotEmpty()) { if(now >= LocalDateTime.parse(pending)) { val next=setting("boundary_next").toInt(); setSetting("boundary",next.toString()); setSetting("boundary_effective",""); return Rules.day(now,next) };return minOf(Rules.day(now,boundary),setting("boundary_previous_day",Rules.day(now,boundary))) }; return Rules.day(now,boundary)
+ // Task plans roll over at midnight. The entertainment pool keeps its separate
+ // configurable boundary (04:00 by default).
+ fun day(): String = now().toLocalDate().toString()
+ fun rewardDay(): String {
+  val current=now();val boundary=setting("boundary","4").toIntOrNull()?.coerceIn(0,23)?:4
+  val pending=setting("boundary_effective")
+  if(pending.isNotEmpty()) {
+   if(current>=LocalDateTime.parse(pending)) { val next=setting("boundary_next").toInt();setSetting("boundary",next.toString());setSetting("boundary_effective","");return Rules.day(current,next) }
+   return minOf(Rules.day(current,boundary),setting("boundary_previous_day",Rules.day(current,boundary)))
+  }
+  return Rules.day(current,boundary)
  }
  fun ensure(day: String = day()) {
   val db = writableDatabase
@@ -73,10 +81,11 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
    while(date.toString()<day){ensure(date.toString());date=date.plusDays(1)}
    setSetting("generated_through",day)
   }
-  if(day==day() && setting("expiry_checked")!=day) {
-   allocateLegacySpending(db,day,"video");allocateLegacySpending(db,day,"game")
+  val rewardDate=rewardDay()
+  if(day==day() && setting("expiry_checked")!=rewardDate) {
+   allocateLegacySpending(db,rewardDate,"video");allocateLegacySpending(db,rewardDate,"game")
    db.beginTransaction()
-   try { val expired=mutableListOf<Triple<String,String,Long>>(); db.rawQuery("SELECT day,kind,SUM(amount) FROM ledger WHERE day<? GROUP BY day,kind HAVING SUM(amount)>0",arrayOf(day)).use { c->while(c.moveToNext()) expired.add(Triple(c.getString(0),c.getString(1),c.getLong(2))) };expired.forEach { (date,kind,amount)->val created=System.currentTimeMillis();ledgerAt(db,date,"expiry",kind,-amount,created);allocateSpend(db,date,kind,amount,created);audit(date,"未使用奖励过期：$kind / $amount") };setSetting("expiry_checked",day);db.setTransactionSuccessful() } finally {db.endTransaction()}
+   try { val expired=mutableListOf<Triple<String,String,Long>>(); db.rawQuery("SELECT day,kind,SUM(amount) FROM ledger WHERE day<? GROUP BY day,kind HAVING SUM(amount)>0",arrayOf(rewardDate)).use { c->while(c.moveToNext()) expired.add(Triple(c.getString(0),c.getString(1),c.getLong(2))) };expired.forEach { (date,kind,amount)->val created=System.currentTimeMillis();ledgerAt(db,date,"expiry",kind,-amount,created);allocateSpend(db,date,kind,amount,created);audit(date,"未使用奖励过期：$kind / $amount") };setSetting("expiry_checked",rewardDate);db.setTransactionSuccessful() } finally {db.endTransaction()}
   }
   val confirmed = db.rawQuery("SELECT confirmed FROM contracts WHERE day=?", arrayOf(day)).use { if(it.moveToFirst()) it.getInt(0) != 0 else null }
   if (confirmed == true || confirmed != null && day < day()) { issueCompletedRequiredRewards(db,day); return }
@@ -148,9 +157,9 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
   events.forEach{(time,amount)->allocateSpend(db,day,kind,amount,time)}
   setSetting(marker,"true")
  }
- fun balance(kind: String, day: String = day()): Long = readableDatabase.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND kind=?",arrayOf(day,kind)).use { it.moveToFirst(); it.getLong(0).coerceAtLeast(0) }
- fun consume(kind: String, amount: Long, day: String = day()) { val db = writableDatabase; db.beginTransaction(); try { allocateLegacySpending(db,day,kind);val actual = minOf(balance(kind,day),amount.coerceAtLeast(0)); if(actual > 0) {val created=System.currentTimeMillis();appendDebit(db,day,"usage",kind,actual,created);allocateSpend(db,day,kind,actual,created)}; db.setTransactionSuccessful() } finally { db.endTransaction() } }
- fun claim(task: Task, kind: String) { val db = writableDatabase; db.beginTransaction(); try { val fresh = tasks(task.date).first { it.id == task.id }; if (eligible(task.date) && !fresh.required && fresh.done && !fresh.claimed && task.date == day()) { val amount = if(kind == "video") fresh.rewardMinutes * 60000L else fresh.rewardGames.toLong(); require(amount > 0); ledger(db,task.date,task.id,kind,amount); db.update("tasks",cv("claimed" to true),"id=?",arrayOf(task.id)) }; db.setTransactionSuccessful() } finally { db.endTransaction() } }
+ fun balance(kind: String, day: String = rewardDay()): Long = readableDatabase.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND kind=?",arrayOf(day,kind)).use { it.moveToFirst(); it.getLong(0).coerceAtLeast(0) }
+ fun consume(kind: String, amount: Long, day: String = rewardDay()) { val db = writableDatabase; db.beginTransaction(); try { allocateLegacySpending(db,day,kind);val actual = minOf(balance(kind,day),amount.coerceAtLeast(0)); if(actual > 0) {val created=System.currentTimeMillis();appendDebit(db,day,"usage",kind,actual,created);allocateSpend(db,day,kind,actual,created)}; db.setTransactionSuccessful() } finally { db.endTransaction() } }
+ fun claim(task: Task, kind: String) { val db = writableDatabase; db.beginTransaction(); try { val fresh = tasks(task.date).first { it.id == task.id }; if (eligible(task.date) && !fresh.required && fresh.done && !fresh.claimed && task.date == day()) { val amount = if(kind == "video") fresh.rewardMinutes * 60000L else fresh.rewardGames.toLong(); require(amount > 0); ledger(db,rewardDay(),task.id,kind,amount); db.update("tasks",cv("claimed" to true),"id=?",arrayOf(task.id)) }; db.setTransactionSuccessful() } finally { db.endTransaction() } }
  fun start(task: Task) { val fresh=tasks(task.date).first{it.id==task.id};if(fresh.done || fresh.runningSince != 0L) return; runningTasks().forEach{pause(it)};writableDatabase.update("tasks",cv("running_since" to SystemClock.elapsedRealtime(),"boot_time" to (System.currentTimeMillis()-SystemClock.elapsedRealtime())),"id=?",arrayOf(task.id)) }
  fun elapsed(task: Task): Long { val sameBoot = kotlin.math.abs((System.currentTimeMillis()-SystemClock.elapsedRealtime()) - task.bootTime) < 120000; return task.elapsed + if(task.runningSince > 0 && sameBoot) (SystemClock.elapsedRealtime()-task.runningSince).coerceAtLeast(0) else 0 }
  fun pause(task: Task) { val fresh=tasks(task.date).first{it.id==task.id};if(fresh.runningSince==0L)return;writableDatabase.update("tasks",cv("elapsed" to elapsed(fresh),"running_since" to 0L,"boot_time" to 0L),"id=?",arrayOf(task.id)) }
@@ -170,7 +179,7 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
    if(task.date==day() && fresh.required) {
     listOf("video" to fresh.rewardMinutes.toLong()*60000L,"game" to fresh.rewardGames.toLong()).forEach { (kind,amount) ->
      val key="task_reward_${fresh.id}_$kind"
-     if(amount>0 && setting(key)!="true") { ledger(db,task.date,fresh.id,kind,amount);setSetting(key,"true") }
+     if(amount>0 && setting(key)!="true") { ledger(db,rewardDay(),fresh.id,kind,amount);setSetting(key,"true") }
     }
    }
    db.setTransactionSuccessful()
@@ -206,7 +215,7 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
    db.setTransactionSuccessful();targetId
   } finally {db.endTransaction()}
  }
- fun scheduleBoundary(hour:Int) { require(hour in 0..23); val date=day();val old=setting("boundary","4").toInt(); val effective=LocalDate.parse(date).plusDays(1).atStartOfDay().plusHours(maxOf(old,hour).toLong());setSetting("boundary_previous_day",date); setSetting("boundary_next",hour.toString()); setSetting("boundary_effective",effective.toString()); audit(date,"日界线将于 $effective 改为 $hour:00") }
+ fun scheduleBoundary(hour:Int) { require(hour in 0..23); val date=day();val old=setting("boundary","4").toInt(); val effective=LocalDate.parse(rewardDay()).plusDays(1).atStartOfDay().plusHours(maxOf(old,hour).toLong());setSetting("boundary_previous_day",rewardDay()); setSetting("boundary_next",hour.toString()); setSetting("boundary_effective",effective.toString()); audit(date,"娱乐额度重置时间将于 $effective 改为 $hour:00") }
  fun planRest(date:String,minutes:Int=30,games:Int=0) {
   require(date>day());val db=writableDatabase;db.beginTransaction()
   try { require(!contract(date).confirmed);val original=tasks(date).filter{it.required}.joinToString {it.title};db.update("tasks",cv("required" to false),"day=? AND done=0",arrayOf(date));db.update("contracts",cv("rest" to true,"confirmed" to true,"base_minutes" to minutes,"base_games" to games),"day=?",arrayOf(date));audit(date,"预设休息日；原必做改为选做：$original");db.setTransactionSuccessful() } finally {db.endTransaction()}
@@ -236,9 +245,9 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
  fun rewardHistory(): List<String> {
   val out=mutableListOf<String>()
   readableDatabase.rawQuery("SELECT l.day,l.kind,l.amount,l.task_id,l.created,t.title FROM ledger l LEFT JOIN tasks t ON t.id=l.task_id WHERE l.amount<>0 AND l.kind NOT LIKE '%_allocation' ORDER BY l.created DESC,l.rowid DESC LIMIT 100",null).use {c->while(c.moveToNext()) {
-   val amount=c.getLong(2);val source=c.getString(3);val date=LocalDate.parse(c.getString(0));val absolute=kotlin.math.abs(amount);val value=if(c.getString(1)=="video") {val minutes=absolute/60000;val seconds=absolute%60000/1000;when{minutes==0L->"${seconds.coerceAtLeast(1)} 秒";seconds==0L->"$minutes 分钟";else->"$minutes 分 $seconds 秒"}} else "${absolute} 局"
+   val amount=c.getLong(2);val source=c.getString(3);val eventTime=java.time.Instant.ofEpochMilli(c.getLong(4)).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime();val absolute=kotlin.math.abs(amount);val value=if(c.getString(1)=="video") {val minutes=absolute/60000;val seconds=absolute%60000/1000;when{minutes==0L->"${seconds.coerceAtLeast(1)} 秒";seconds==0L->"$minutes 分钟";else->"$minutes 分 $seconds 秒"}} else "${absolute} 局"
    val label=when{source=="expiry"->"额度到期 −$value";source=="usage"->"已使用 $value";source.startsWith("sleep:")->"睡眠规则扣减 −$value";source.startsWith("sleep-refund:")->"睡眠修正返还 +$value";amount<0->"奖励冲回 −$value";source=="base"->"历史基础奖励 +$value";else->"${if(readableDatabase.rawQuery("SELECT required FROM tasks WHERE id=?",arrayOf(source)).use{it.moveToFirst()&&it.getInt(0)!=0})"必做奖励" else "选做奖励"} · ${c.getString(5)?:"历史任务"} +$value"}
-   val time=java.time.Instant.ofEpochMilli(c.getLong(4)).atZone(java.time.ZoneId.systemDefault()).toLocalTime().toString().take(5);out.add("${date.monthValue}月${date.dayOfMonth}日 $time · $label")
+   val time=eventTime.toLocalTime().toString().take(5);out.add("${eventTime.monthValue}月${eventTime.dayOfMonth}日 $time · $label")
   } }
   return out
  }
@@ -249,11 +258,14 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
    if(fresh.done) {
     val source = fresh.id
     for(kind in listOf("video","game")) {
-     allocateLegacySpending(db,task.date,kind)
-     val granted = db.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND task_id=? AND kind=?",arrayOf(task.date,source,kind)).use { it.moveToFirst(); it.getLong(0) }
-     val spent = db.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND task_id=? AND kind=?",arrayOf(task.date,source,allocationKind(kind))).use { it.moveToFirst(); it.getLong(0) }
-     val reversal = minOf((granted+spent).coerceAtLeast(0),balance(kind,task.date))
-     if(reversal > 0) ledger(db,task.date,"revoke:$source",kind,-reversal)
+     val buckets=mutableListOf<String>();db.rawQuery("SELECT DISTINCT day FROM ledger WHERE task_id=? AND kind=?",arrayOf(source,kind)).use{while(it.moveToNext())buckets.add(it.getString(0))}
+     for(bucket in buckets) {
+      allocateLegacySpending(db,bucket,kind)
+      val granted = db.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND task_id=? AND kind=?",arrayOf(bucket,source,kind)).use { it.moveToFirst(); it.getLong(0) }
+      val spent = db.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND task_id=? AND kind=?",arrayOf(bucket,source,allocationKind(kind))).use { it.moveToFirst(); it.getLong(0) }
+      val reversal = minOf((granted+spent).coerceAtLeast(0),balance(kind,bucket))
+      if(reversal > 0) ledger(db,bucket,"revoke:$source",kind,-reversal)
+     }
     }
     db.update("tasks",cv("done" to false),"id=?",arrayOf(task.id)); audit(task.date,"撤销任务：${fresh.title}；已领取额度按剩余余额冲正")
    }
@@ -278,15 +290,16 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
   val desiredWake=if(!excepted&&woke.isAfter(wakeTarget))targets[3].toLong()*60000 else 0L
   val db=writableDatabase;db.beginTransaction()
   try {
+   val rewardDate=old?.let{org.json.JSONObject(setting("sleep_record_$date")).optString("reward_day",date)}?:rewardDay()
    fun reconcile(kind:String,oldAmount:Long,newAmount:Long,source:String):Long {
     val delta=newAmount-oldAmount
-    if(delta>0){val charged=minOf(balance(kind,date),delta);if(charged>0){val at=System.currentTimeMillis();ledgerAt(db,date,"sleep:$source:$date",kind,-charged,at);allocateSpend(db,date,kind,charged,at)};return oldAmount+charged}
-    if(delta<0){val refund=minOf(oldAmount,-delta);if(refund>0)ledger(db,date,"sleep-refund:$source:$date:${System.currentTimeMillis()}",kind,refund);return oldAmount-refund}
+    if(delta>0){val charged=minOf(balance(kind,rewardDate),delta);if(charged>0){val at=System.currentTimeMillis();ledgerAt(db,rewardDate,"sleep:$source:$date",kind,-charged,at);allocateSpend(db,rewardDate,kind,charged,at)};return oldAmount+charged}
+    if(delta<0){val refund=minOf(oldAmount,-delta);if(refund>0)ledger(db,rewardDate,"sleep-refund:$source:$date:${System.currentTimeMillis()}",kind,refund);return oldAmount-refund}
     return oldAmount
    }
    val bedApplied=reconcile("video",old?.bedtimePenalty?:0,desiredBed,"bedtime")
    val wakeApplied=reconcile("video",old?.wakePenalty?:0,desiredWake,"wake")
-   val record=org.json.JSONObject().put("bedtime",bedtime).put("wake",wake).put("bed_penalty",bedApplied).put("wake_penalty",wakeApplied).put("excepted",excepted).put("reason",reason.trim())
+   val record=org.json.JSONObject().put("bedtime",bedtime).put("wake",wake).put("bed_penalty",bedApplied).put("wake_penalty",wakeApplied).put("excepted",excepted).put("reason",reason.trim()).put("reward_day",rewardDate)
    setSetting("sleep_record_$date",record.toString())
    val detail=if(excepted) "睡眠例外：${reason.trim()}" else "手动睡眠记录：就寝 $bedtime，起床 $wake；扣减 ${(bedApplied+wakeApplied)/60000} 分钟"+(if(old!=null)"；修正原因：${reason.trim()}" else "")
    audit(date,detail);db.setTransactionSuccessful()
@@ -299,7 +312,7 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
     val task=c.task()
     listOf("video" to task.rewardMinutes.toLong()*60000L,"game" to task.rewardGames.toLong()).forEach{(kind,amount)->
      val key="task_reward_${task.id}_$kind"
-     if(amount>0&&setting(key)!="true") {ledger(db,date,task.id,kind,amount);setSetting(key,"true")}
+     if(amount>0&&setting(key)!="true") {ledger(db,rewardDay(),task.id,kind,amount);setSetting(key,"true")}
     }
    }};if(ownsTransaction)db.setTransactionSuccessful()
   } finally {if(ownsTransaction)db.endTransaction()}

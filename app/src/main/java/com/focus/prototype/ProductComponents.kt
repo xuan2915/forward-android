@@ -28,7 +28,7 @@ import java.time.format.DateTimeFormatter
 import kotlin.math.ceil
 
 @Composable fun AppNavigation(page:Int,onPage:(Int)->Unit) {
- val tabs=listOf(0 to "今天",4 to "专注",1 to "奖励",2 to "成长",3 to "复盘")
+ val tabs=listOf(0 to "今天",4 to "专注",1 to "奖励",2 to "成长")
  val haptics=LocalHapticFeedback.current
  Surface(modifier=Modifier.navigationBarsPadding().padding(horizontal=16.dp,vertical=8.dp),shape=RoundedCornerShape(25.dp),color=AppColors.Surface,border=BorderStroke(1.dp,AppColors.Border)) {
   Row(Modifier.fillMaxWidth().height(70.dp)) {
@@ -43,7 +43,6 @@ import kotlin.math.ceil
        1 -> {drawCircle(tint,w*.42f,style=Stroke(stroke));drawLine(tint,Offset(w*.5f,h*.12f),Offset(w*.5f,h*.5f),stroke);drawLine(tint,Offset(w*.5f,h*.5f),Offset(w*.7f,h*.65f),stroke)}
        2 -> {drawLine(tint,Offset(w*.5f,0f),Offset(w*.9f,h*.5f),stroke);drawLine(tint,Offset(w*.9f,h*.5f),Offset(w*.5f,h),stroke);drawLine(tint,Offset(w*.5f,h),Offset(w*.1f,h*.5f),stroke);drawLine(tint,Offset(w*.1f,h*.5f),Offset(w*.5f,0f),stroke)}
        3 -> {drawLine(tint,Offset(0f,h*.85f),Offset(w*.35f,h*.5f),stroke);drawLine(tint,Offset(w*.35f,h*.5f),Offset(w*.6f,h*.65f),stroke);drawLine(tint,Offset(w*.6f,h*.65f),Offset(w,h*.15f),stroke)}
-       4 -> {drawRoundRect(tint,Offset(w*.12f,0f),Size(w*.76f,h),style=Stroke(stroke));for(y in 1..3)drawLine(tint,Offset(w*.3f,h*y*.23f),Offset(w*.7f,h*y*.23f),stroke)}
       }
      }
      Text(title,fontSize=11.sp,color=tint,fontWeight=if(selected)FontWeight.SemiBold else FontWeight.Normal)
