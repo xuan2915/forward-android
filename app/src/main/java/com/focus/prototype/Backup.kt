@@ -73,7 +73,7 @@ object Backup {
             for (index in 0 until rows.length()) rows.getJSONObject(index).optString("path").takeIf(String::isNotBlank)?.let(paths::add)
         }
         data.getJSONArray("tasks").let { rows ->
-            for (index in 0 until rows.length()) rows.getJSONObject(index).optString("evidence").takeIf(String::isNotBlank)?.let(paths::add)
+            for (index in 0 until rows.length()) rows.getJSONObject(index).optString("evidence").takeIf { it.isNotBlank() && !it.startsWith("proof-submitted:") }?.let(paths::add)
         }
         for (path in paths) {
             val file = File(path)
@@ -174,7 +174,7 @@ object Backup {
                         when (table) {
                             "tasks" -> {
                                 val oldPath = values.getAsString("evidence").orEmpty()
-                                values.put("evidence", if (oldPath.isBlank()) "" else restoredPaths[oldPath] ?: error("任务证明文件缺失：${File(oldPath).name}"))
+                                values.put("evidence", if (oldPath.isBlank() || oldPath.startsWith("proof-submitted:")) oldPath else restoredPaths[oldPath] ?: error("任务证明文件缺失：${File(oldPath).name}"))
                                 values.put("running_since", 0L)
                                 values.put("boot_time", 0L)
                             }
@@ -289,7 +289,7 @@ object Backup {
     private fun referencedPaths(data: JSONObject): Set<String> = buildSet {
         listOf("attachments" to "path", "tasks" to "evidence").forEach { (table, column) ->
             data.optJSONArray(table)?.let { rows ->
-                for (index in 0 until rows.length()) rows.getJSONObject(index).optString(column).takeIf(String::isNotBlank)?.let(::add)
+                for (index in 0 until rows.length()) rows.getJSONObject(index).optString(column).takeIf { it.isNotBlank() && !(table=="tasks" && it.startsWith("proof-submitted:")) }?.let(::add)
             }
         }
     }

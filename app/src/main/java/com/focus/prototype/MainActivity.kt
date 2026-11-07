@@ -209,7 +209,7 @@ internal fun focusDuration(milliseconds:Long):String = when {
 }
 
 @Composable private fun TaskEditor(day:String,db:Database,onCancel:()->Unit,onSave:()->Unit) {
- var title by remember { mutableStateOf("") }; var required by remember { mutableStateOf(!db.contract(day).confirmed) }; var minutes by remember { mutableStateOf("25") }; var mode by remember { mutableStateOf("行动型") }; var checklist by remember { mutableStateOf("") }; var video by remember { mutableStateOf(if(!db.contract(day).confirmed) "10" else "20") }; var games by remember { mutableStateOf(if(!db.contract(day).confirmed) "0" else "1") }; var recurrence by remember { mutableStateOf("once") };var weekdays by remember{mutableStateOf(setOf(1,2,3,4,5))}
+ var title by remember { mutableStateOf("") }; var required by remember { mutableStateOf(!db.contract(day).confirmed) }; var minutes by remember { mutableStateOf("25") }; var mode by remember { mutableStateOf("行动型") }; var checklist by remember { mutableStateOf("") }; var video by remember { mutableStateOf(if(!db.contract(day).confirmed) "10" else "20") }; var games by remember { mutableStateOf(if(!db.contract(day).confirmed) "0" else "1") }; var recurrence by remember { mutableStateOf("once") };var weekdays by remember{mutableStateOf(setOf(1,2,3,4,5))};var intervalDays by remember{mutableStateOf("3")}
  Header("PLAN / $day","添加任务")
  CardBlock {
   OutlinedTextField(title,onValueChange={title=it},label={Text("任务名称")},modifier=Modifier.fillMaxWidth())
@@ -220,8 +220,10 @@ internal fun focusDuration(milliseconds:Long):String = when {
   Text("重复："); Row { listOf("once" to "一次", "daily" to "每天", "weekly" to "每周同日").forEach { (v,label) -> TextButton(onClick={recurrence=v}) { Text(if(recurrence==v) "✓$label" else label) } } }
   TextButton(onClick={recurrence="days:"+weekdays.sorted().joinToString(",")}){Text(if(recurrence.startsWith("days:")) "✓ 指定星期" else "指定星期")}
   if(recurrence.startsWith("days:"))Row(Modifier.fillMaxWidth()){(1..7).forEach {dayOfWeek->FilterChip(selected=dayOfWeek in weekdays,onClick={weekdays=if(dayOfWeek in weekdays)weekdays-dayOfWeek else weekdays+dayOfWeek;recurrence="days:"+weekdays.sorted().joinToString(",")},label={Text(listOf("一","二","三","四","五","六","日")[dayOfWeek-1])},modifier=Modifier.weight(1f))}}
+  TextButton(onClick={recurrence="interval:${intervalDays.toIntOrNull()?.coerceIn(1,365)?:3}"}){Text(if(recurrence.startsWith("interval:")) "✓ 自定义间隔" else "自定义间隔")}
+  if(recurrence.startsWith("interval:")){NumberField("每隔几天（1–365）",intervalDays){intervalDays=it;recurrence="interval:${it.toIntOrNull()?.coerceIn(1,365)?:1}"};Text("从任务开始日期起按间隔生成，不会重复创建。",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)}
   Text(if(required) "完成后自动发放奖励" else "选做完成后领取一项奖励"); NumberField("视频分钟",video){video=it}; NumberField("游戏局数",games){games=it}
-  Row { Button(enabled=title.isNotBlank() && recurrence!="days:" && (!db.contract(day).confirmed || !required),onClick={ db.addTask(day,title,required,minutes.toIntOrNull()?:0,mode,checklist,video.toIntOrNull()?:0,games.toIntOrNull()?:0,recurrence); onSave() }) {Text("保存")}; TextButton(onClick=onCancel){Text("取消")} }
+  Row { Button(enabled=title.isNotBlank() && recurrence!="days:" && (!recurrence.startsWith("interval:") || (intervalDays.toIntOrNull()?:0) in 1..365) && (!db.contract(day).confirmed || !required),onClick={ db.addTask(day,title,required,minutes.toIntOrNull()?:0,mode,checklist,video.toIntOrNull()?:0,games.toIntOrNull()?:0,recurrence); onSave() }) {Text("保存")}; TextButton(onClick=onCancel){Text("取消")} }
  }
 }
 

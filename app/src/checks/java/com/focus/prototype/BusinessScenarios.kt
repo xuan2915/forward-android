@@ -17,6 +17,10 @@ fun resign(root:org.json.JSONObject,payload:org.json.JSONObject):String { val bo
     db.addTask(db.day(),"optional",false,0,"行动型","done",20,1,"once")
     db.confirm(db.day(),false,30,1);check(!db.eligible());val required=db.tasks().first{it.required};db.complete(required);check(db.balance("video")==1200000L);db.complete(required);check(db.balance("video")==1200000L)
    }
+   test("custom interval recurrence is anchored and generated once") {
+    val other="interval-recurrence.db";context.deleteDatabase(other);var clock=LocalDateTime.parse("2026-11-01T12:00:00");val d=Database(context,other){clock}
+    try {val start=d.day();d.addTask(start,"every three days",true,0,"行动型","",0,0,"interval:3");check(d.tasks(start).single().title=="every three days");clock=clock.plusDays(2);check(d.tasks().isEmpty());clock=clock.plusDays(1);check(d.tasks().single().date=="2026-11-04");repeat(3){d.ensure()};check(d.tasks().size==1);clock=clock.plusDays(3);check(d.tasks().single().date=="2026-11-07")}finally{d.close()}
+   }
    test("optional choice idempotency and consumption") {
     val optional=db.tasks().first{!it.required};db.complete(optional);repeat(3){db.claim(optional,"video")};db.claim(optional,"game");check(db.balance("video")==2400000L);check(db.balance("game")==1L);db.consume("video",60000);check(db.balance("video")==2340000L)
    }
@@ -54,7 +58,11 @@ fun resign(root:org.json.JSONObject,payload:org.json.JSONObject):String { val bo
    test("invalid restore leaves records intact") { val before=db.xp();check(runCatching{Backup.restore(context,db,"{}")}.isFailure);check(db.xp()==before) }
    test("modified backup fails checksum without changing records") { val before=db.xp();val root=org.json.JSONObject(Backup.export(context,db)).put("sha256","tampered");check(runCatching{Backup.restore(context,db,root.toString())}.isFailure);check(db.xp()==before) }
    test("multiple full attachments survive restore and removal") {
-    val task=db.tasks().first{it.title=="proof"};val second=File(context.filesDir,"evidence/second.pdf");second.writeText("%PDF-test-bytes");db.evidence(task,second.absolutePath);check(db.attachments(task).size==2);val saved=Backup.export(context,db);repeat(3){Backup.restore(context,db,saved)};check(db.attachments(task).map{File(it.second).readText()}.toSet()==setOf("evidence bytes","%PDF-test-bytes"));db.removeAttachment(task,db.attachments(task).last().first);check(db.attachments(task).size==1)
+    val task=db.tasks().first{it.title=="proof"};val second=File(context.filesDir,"evidence/second.pdf");second.writeText("%PDF-test-bytes");db.evidence(task,second.absolutePath);check(db.attachments(task).size==2);val saved=Backup.export(context,db);repeat(3){Backup.restore(context,db,saved)};check(db.attachments(task).map{File(it.second).readText()}.toSet()==setOf("evidence bytes","%PDF-test-bytes"));val removed=db.attachments(task).last();db.removeAttachment(task,removed.first);check(db.attachments(task).size==1);check(!File(removed.second).exists())
+   }
+   test("no-save proof remains verifiable without becoming an attachment") {
+    val other="no-save-proof.db";context.deleteDatabase(other);val d=Database(context,other){now}
+    try {val date=d.day();d.addTask(date,"no local proof",true,0,"成果型","",4,0,"once");val task=d.tasks().single();d.confirm(date,false,0,0);d.submitProof(task,"image selection");d.complete(task);val backup=Backup.export(context,d);val preview=Backup.inspect(backup);check(preview.attachments==0&&preview.completedTasks==1);d.setSetting("discard-me","yes");Backup.restore(context,d,backup);val restored=d.tasks().single();check(restored.done&&restored.evidence.startsWith("proof-submitted:")&&d.attachments(restored).isEmpty());check(Backup.export(context,d).isNotBlank())}finally{d.close()}
    }
    test("focus pause resume checkpoint and stale events") {
     val task=db.tasks().first{it.title=="proof"};db.start(task);android.os.SystemClock.sleep(150);db.start(task);db.checkpoint();val elapsed=db.elapsed(db.tasks().first{it.id==task.id});check(elapsed>=100);db.pause(task);db.pause(task);check(db.tasks().first{it.id==task.id}.elapsed>=elapsed);db.close();db=Database(context,name){now};check(db.tasks().first{it.id==task.id}.elapsed>=elapsed)

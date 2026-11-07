@@ -147,6 +147,13 @@ fun TaskDetailSheet(
                 }
             }
 
+            if (task.done && (task.evidence.isNotBlank() || db.attachments(task).isNotEmpty())) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("历史完成证明", style = MaterialTheme.typography.titleMedium)
+                    ProofActions(task, db, onChanged)
+                }
+            }
+
             if (task.done) {
                 if (task.required && (task.rewardMinutes>0 || task.rewardGames>0)) {
                     Text("本项奖励已自动到账："+buildList{if(task.rewardMinutes>0)add("${task.rewardMinutes} 分钟");if(task.rewardGames>0)add("${task.rewardGames} 局")}.joinToString(" · "),style=MaterialTheme.typography.bodyMedium,color=AppColors.Muted)
@@ -184,7 +191,7 @@ fun TaskDetailSheet(
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("完成证明", style = MaterialTheme.typography.titleMedium)
-                    Text("照片和附件保存在本机，提交后用于完成自检。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                    Text(if(db.setting("proof_no_save_${task.id}")=="true") "你选择的文件只用于提交证明，不会保存在本机。" else "照片和附件保存在本机，提交后用于完成自检。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
                     ProofActions(task, db, onChanged)
                 }
 
