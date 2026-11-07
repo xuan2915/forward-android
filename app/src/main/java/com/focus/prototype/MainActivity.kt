@@ -158,7 +158,7 @@ class MainActivity : ComponentActivity() {
         item {Header("计划管理","提前安排与笔记导入")}
         item {ImportEditor(db,today,refresh){refresh++}}
         item {FuturePlan(db,onAdd={targetDay=it;editor=true}){refresh++}}
-        item {BackupView(db){dataVersion++;refresh++}}
+        item {BackupView(db,{dataVersion++;refresh++},{focusTimer.resetAfterRestore()})}
         item {Text("受限应用",style=MaterialTheme.typography.titleLarge);Text("已选择 ${store.selected.size} 个应用",color=AppColors.Muted)}
         items(apps,key={it.activityInfo.packageName}) {app->val pkg=app.activityInfo.packageName;Row(Modifier.fillMaxWidth().toggleable(value=pkg in store.selected,onValueChange={checked->store.selected=if(checked)store.selected+pkg else store.selected-pkg;refresh++}),verticalAlignment=Alignment.CenterVertically){Text(app.loadLabel(packageManager).toString(),modifier=Modifier.weight(1f));Checkbox(pkg in store.selected,onCheckedChange=null)}}
        }

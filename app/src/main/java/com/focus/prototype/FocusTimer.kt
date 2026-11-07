@@ -142,6 +142,20 @@ class FocusTimer(
 
     fun dismissNotice() = db.setSetting("focus_notice", "")
 
+    /** Imported task history is paused; do not resume a timer from the other installation. */
+    fun resetAfterRestore() {
+        db.setSetting("focus_task", "")
+        db.setSetting("focus_phase", "ready")
+        db.setSetting("focus_paused_phase", "")
+        db.setSetting("focus_remaining", "0")
+        db.setSetting("focus_segment_started", "0")
+        db.setSetting("focus_segment_elapsed", "0")
+        db.setSetting("focus_deadline", "0")
+        db.setSetting("focus_wall_deadline", "0")
+        db.setSetting("focus_notice", "")
+        rememberBoot()
+    }
+
     /** Returns true once when a countdown changes phase. */
     fun advance(): Boolean {
         reconcileBoot()

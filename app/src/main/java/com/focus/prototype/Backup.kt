@@ -1,27 +1,312 @@
 package com.focus.prototype
+
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import android.util.Base64
+import java.security.MessageDigest
+import java.util.UUID
+
+internal data class BackupPreview(
+    val formatVersion: Int,
+    val createdAt: Long,
+    val appVersion: String,
+    val databaseVersion: Int,
+    val integrity: String,
+    val tasks: Int,
+    val completedTasks: Int,
+    val days: Int,
+    val rewardRecords: Int,
+    val attachments: Int,
+    val sleepRecords: Int,
+    val xp: Int,
+)
 
 object Backup {
- private val tables=listOf("contracts","tasks","task_moves","ledger","reviews","audit","settings","templates","attachments")
- fun export(context:Context,db:Database):String {
-  db.checkpoint();val root=JSONObject().put("version",4);val data=JSONObject();val sql=db.writableDatabase
-  sql.beginTransaction()
-  try { for(table in tables) { val rows=JSONArray();sql.rawQuery("SELECT * FROM $table",null).use { c->while(c.moveToNext()){val row=JSONObject();c.columnNames.forEachIndexed { i,key->row.put(key,if(c.isNull(i)) JSONObject.NULL else c.getString(i)) };rows.put(row)} };data.put(table,rows) };sql.setTransactionSuccessful() } finally {sql.endTransaction()}
-  root.put("data",data);root.put("selected",JSONArray(Store(context).selected.toList()))
-  val files=JSONObject();sql.rawQuery("SELECT DISTINCT path FROM attachments",null).use{c->while(c.moveToNext()){val file=File(c.getString(0));files.put(file.name,Base64.encodeToString(file.readBytes(),Base64.NO_WRAP))}};root.put("files",files);return root.toString()
- }
- fun restore(context:Context,db:Database,text:String) {
-  val root=JSONObject(text);require(root.getInt("version") in 1..4);val data=root.getJSONObject("data");tables.filter{it!="templates" && it!="attachments" && it!="task_moves"}.forEach{require(data.has(it))}; val selected=root.getJSONArray("selected");val appSelection=(0 until selected.length()).map{selected.getString(it)}.toSet()
-  val files=root.getJSONObject("files");val restored=mutableMapOf<String,String>()
-  files.keys().forEach { name->require(name==File(name).name && name!=".." && name!="."); val dest=File(context.filesDir,"evidence/${java.util.UUID.randomUUID()}.${File(name).extension}");dest.parentFile?.mkdirs();dest.writeBytes(Base64.decode(files.getString(name),Base64.DEFAULT));restored[name]=dest.absolutePath }
-  val sql=db.writableDatabase;sql.beginTransaction()
-  try { tables.forEach { table->sql.delete(table,null,null);val rows=data.optJSONArray(table)?:JSONArray(); for(i in 0 until rows.length()){val row=rows.getJSONObject(i);val values=ContentValues();row.keys().forEach { key->if(row.isNull(key))values.putNull(key) else values.put(key,row.getString(key)) };if(table=="tasks"){val old=values.getAsString("evidence");if(!old.isNullOrBlank()) values.put("evidence",restored[File(old).name]?:"");values.put("running_since",0);values.put("boot_time",0)};if(table=="attachments"){val old=values.getAsString("path");values.put("path",restored[File(old).name]?:error("附件缺失：$old"))};sql.insertOrThrow(table,null,values)} };if(!data.has("templates"))db.seedTemplates(sql);if(!data.has("attachments"))db.seedAttachments(sql);sql.setTransactionSuccessful() } finally {sql.endTransaction()}
-  Store(context).selected=appSelection
- }
+    private const val FORMAT = "xiangqian-local-backup"
+    private const val CURRENT_VERSION = 5
+    private val tables = listOf("contracts", "tasks", "task_moves", "ledger", "reviews", "audit", "settings", "templates", "attachments")
+    private val requiredTables = listOf("contracts", "tasks", "ledger", "reviews", "audit", "settings")
+
+    private data class Asset(val key: String, val name: String, val bytes: ByteArray)
+    private data class Parsed(
+        val version: Int,
+        val createdAt: Long,
+        val appVersion: String,
+        val databaseVersion: Int,
+        val verified: Boolean,
+        val data: JSONObject,
+        val selected: Set<String>,
+        val assets: List<Asset>,
+    )
+
+    fun export(context: Context, db: Database): String {
+        db.checkpoint()
+        val sql = db.writableDatabase
+        val data = JSONObject()
+        sql.beginTransaction()
+        try {
+            for (table in tables) {
+                val rows = JSONArray()
+                sql.rawQuery("SELECT * FROM $table", null).use { cursor ->
+                    while (cursor.moveToNext()) {
+                        val row = JSONObject()
+                        cursor.columnNames.forEachIndexed { index, key ->
+                            row.put(key, if (cursor.isNull(index)) JSONObject.NULL else cursor.getString(index))
+                        }
+                        rows.put(row)
+                    }
+                }
+                data.put(table, rows)
+            }
+            sql.setTransactionSuccessful()
+        } finally {
+            sql.endTransaction()
+        }
+
+        val assets = JSONArray()
+        val paths = linkedSetOf<String>()
+        data.getJSONArray("attachments").let { rows ->
+            for (index in 0 until rows.length()) rows.getJSONObject(index).optString("path").takeIf(String::isNotBlank)?.let(paths::add)
+        }
+        data.getJSONArray("tasks").let { rows ->
+            for (index in 0 until rows.length()) rows.getJSONObject(index).optString("evidence").takeIf(String::isNotBlank)?.let(paths::add)
+        }
+        for (path in paths) {
+            val file = File(path)
+            require(file.isFile) { "找不到附件文件：${file.name}" }
+            val bytes = file.readBytes()
+            assets.put(JSONObject()
+                .put("key", path)
+                .put("name", file.name)
+                .put("length", bytes.size)
+                .put("sha256", sha256(bytes))
+                .put("content", Base64.encodeToString(bytes, Base64.NO_WRAP)))
+        }
+
+        val payload = JSONObject()
+            .put("data", data)
+            .put("selected", JSONArray(Store(context).selected.toList()))
+            .put("assets", assets)
+        val payloadText = payload.toString()
+        val createdAt = System.currentTimeMillis()
+        val databaseVersion = sql.version
+        return JSONObject()
+            .put("format", FORMAT)
+            .put("version", CURRENT_VERSION)
+            .put("createdAt", createdAt)
+            .put("appVersion", BuildConfig.VERSION_NAME)
+            .put("databaseVersion", databaseVersion)
+            .put("payload", payloadText)
+            .put("sha256", sha256(payloadText.toByteArray(Charsets.UTF_8)))
+            .toString()
+    }
+
+    internal fun inspect(text: String): BackupPreview {
+        val parsed = parse(text)
+        val tasks = parsed.data.optJSONArray("tasks") ?: JSONArray()
+        val completed = (0 until tasks.length()).count { tasks.getJSONObject(it).optInt("done") != 0 }
+        val settings = parsed.data.optJSONArray("settings") ?: JSONArray()
+        val sleepRecords = (0 until settings.length()).count { settings.getJSONObject(it).optString("key").startsWith("sleep_record_") }
+        return BackupPreview(
+            formatVersion = parsed.version,
+            createdAt = parsed.createdAt,
+            appVersion = parsed.appVersion,
+            databaseVersion = parsed.databaseVersion,
+            integrity = if (parsed.verified) "完整性校验通过" else "旧版备份，未包含完整性校验",
+            tasks = tasks.length(),
+            completedTasks = completed,
+            days = parsed.data.optJSONArray("contracts")?.length() ?: 0,
+            rewardRecords = parsed.data.optJSONArray("ledger")?.length() ?: 0,
+            attachments = parsed.assets.size,
+            sleepRecords = sleepRecords,
+            xp = completed * 100,
+        )
+    }
+
+    /** Validates first, stages attachment files, then replaces all database tables in one transaction. */
+    fun restore(context: Context, db: Database, text: String) {
+        val parsed = parse(text)
+        require(parsed.databaseVersion <= db.writableDatabase.version) {
+            "此备份来自更新版本的应用，请先升级后再恢复。"
+        }
+        validateRows(parsed.data, db.writableDatabase)
+        val references = referencedPaths(parsed.data)
+        val assetByKey = parsed.assets.associateBy { it.key }
+        val legacyByName = if (parsed.version < CURRENT_VERSION) parsed.assets.groupBy { it.name } else emptyMap()
+        val resolved = linkedMapOf<String, Asset>()
+        for (path in references) {
+            val asset = assetByKey[path] ?: legacyByName[File(path).name]?.singleOrNull()
+                ?: error("备份缺少附件：${File(path).name}")
+            resolved[path] = asset
+        }
+
+        val stagedFiles = mutableListOf<File>()
+        var committed = false
+        try {
+            val restoredPaths = linkedMapOf<String, String>()
+            for ((path, asset) in resolved) {
+                val extension = asset.name.substringAfterLast('.', "bin").filter(Char::isLetterOrDigit).take(12).ifBlank { "bin" }
+                val target = File(context.filesDir, "evidence/${UUID.randomUUID()}.$extension")
+                target.parentFile!!.mkdirs()
+                target.writeBytes(asset.bytes)
+                stagedFiles.add(target)
+                restoredPaths[path] = target.absolutePath
+            }
+
+            val sql = db.writableDatabase
+            sql.beginTransaction()
+            try {
+                tables.asReversed().forEach { sql.delete(it, null, null) }
+                for (table in tables) {
+                    val rows = parsed.data.optJSONArray(table) ?: JSONArray()
+                    for (index in 0 until rows.length()) {
+                        val row = rows.getJSONObject(index)
+                        val values = ContentValues()
+                        val columns = tableColumns(sql, table)
+                        row.keys().forEach { key ->
+                            require(key in columns) { "备份包含当前版本不支持的字段：$table.$key" }
+                            if (row.isNull(key)) values.putNull(key) else values.put(key, row.getString(key))
+                        }
+                        when (table) {
+                            "tasks" -> {
+                                val oldPath = values.getAsString("evidence").orEmpty()
+                                values.put("evidence", if (oldPath.isBlank()) "" else restoredPaths[oldPath] ?: error("任务证明文件缺失：${File(oldPath).name}"))
+                                values.put("running_since", 0L)
+                                values.put("boot_time", 0L)
+                            }
+                            "attachments" -> {
+                                val oldPath = values.getAsString("path").orEmpty()
+                                values.put("path", restoredPaths[oldPath] ?: error("附件文件缺失：${File(oldPath).name}"))
+                            }
+                        }
+                        sql.insertOrThrow(table, null, values)
+                    }
+                }
+                if (!parsed.data.has("templates")) db.seedTemplates(sql)
+                if (!parsed.data.has("attachments")) db.seedAttachments(sql)
+                sql.setTransactionSuccessful()
+            } finally {
+                sql.endTransaction()
+            }
+            Store(context).selected = parsed.selected
+            committed = true
+        } finally {
+            if (!committed) stagedFiles.forEach(File::delete)
+        }
+    }
+
+    private fun parse(text: String): Parsed {
+        val root = JSONObject(text)
+        val version = root.getInt("version")
+        if (root.optString("format") == FORMAT) {
+            require(version <= CURRENT_VERSION) { "该备份由更新版本的应用创建，请先升级。" }
+            require(version == CURRENT_VERSION) { "备份格式无法识别。" }
+            val payloadText = root.getString("payload")
+            require(sha256(payloadText.toByteArray(Charsets.UTF_8)) == root.getString("sha256")) { "备份校验失败，文件可能已损坏或被修改。" }
+            val payload = JSONObject(payloadText)
+            val assets = parseAssets(payload.optJSONArray("assets") ?: JSONArray(), "key")
+            val data = payload.getJSONObject("data")
+            validateData(data)
+            validateAssetReferences(data, assets, legacy = false)
+            return Parsed(
+                version = version,
+                createdAt = root.getLong("createdAt"),
+                appVersion = root.optString("appVersion", "未知"),
+                databaseVersion = root.getInt("databaseVersion"),
+                verified = true,
+                data = data,
+                selected = readSelected(payload.optJSONArray("selected")),
+                assets = assets,
+            )
+        }
+
+        require(version in 1 until CURRENT_VERSION) { "备份版本不受支持。" }
+        val data = root.getJSONObject("data")
+        validateData(data)
+        val legacy = root.optJSONObject("files") ?: JSONObject()
+        val assets = mutableListOf<Asset>()
+        legacy.keys().forEach { name ->
+            require(name == File(name).name && name != "." && name != "..") { "备份附件名称无效。" }
+            val bytes = Base64.decode(legacy.getString(name), Base64.DEFAULT)
+            assets.add(Asset(name, name, bytes))
+        }
+        validateAssetReferences(data, assets, legacy = true)
+        return Parsed(
+            version = version,
+            createdAt = 0L,
+            appVersion = "旧版",
+            databaseVersion = 0,
+            verified = false,
+            data = data,
+            selected = readSelected(root.optJSONArray("selected")),
+            assets = assets,
+        )
+    }
+
+    private fun parseAssets(array: JSONArray, keyName: String): List<Asset> = buildList {
+        for (index in 0 until array.length()) {
+            val item = array.getJSONObject(index)
+            val key = item.getString(keyName)
+            val name = item.getString("name")
+            require(key.isNotBlank() && name == File(name).name && name != "." && name != "..") { "备份附件信息无效。" }
+            val bytes = Base64.decode(item.getString("content"), Base64.DEFAULT)
+            val digest = sha256(bytes)
+            require(digest == item.getString("sha256") && bytes.size.toLong() == item.getLong("length")) { "附件校验失败：$name" }
+            add(Asset(key, name, bytes))
+        }
+        require(map { it.key }.toSet().size == size) { "备份中有重复的附件记录。" }
+    }
+
+    private fun validateData(data: JSONObject) {
+        requiredTables.forEach { require(data.optJSONArray(it) != null) { "备份缺少数据表：$it" } }
+        tables.forEach { table ->
+            data.optJSONArray(table)?.let { rows ->
+                for (index in 0 until rows.length()) require(rows.get(index) is JSONObject) { "备份数据格式无效：$table" }
+            }
+        }
+    }
+
+    private fun validateRows(data: JSONObject, sql: SQLiteDatabase) {
+        validateData(data)
+        for (table in tables) {
+            val rows = data.optJSONArray(table) ?: continue
+            val columns = tableColumns(sql, table)
+            for (index in 0 until rows.length()) {
+                val row = rows.getJSONObject(index)
+                row.keys().forEach { key -> require(key in columns) { "备份包含当前版本不支持的字段：$table.$key" } }
+            }
+        }
+    }
+
+    private fun tableColumns(sql: SQLiteDatabase, table: String): Set<String> = buildSet {
+        sql.rawQuery("PRAGMA table_info($table)", null).use { while (it.moveToNext()) add(it.getString(1)) }
+    }
+
+    private fun referencedPaths(data: JSONObject): Set<String> = buildSet {
+        listOf("attachments" to "path", "tasks" to "evidence").forEach { (table, column) ->
+            data.optJSONArray(table)?.let { rows ->
+                for (index in 0 until rows.length()) rows.getJSONObject(index).optString(column).takeIf(String::isNotBlank)?.let(::add)
+            }
+        }
+    }
+
+    private fun validateAssetReferences(data: JSONObject, assets: List<Asset>, legacy: Boolean) {
+        val byKey = assets.mapTo(hashSetOf()) { it.key }
+        val byName = assets.groupBy { it.name }
+        referencedPaths(data).forEach { path ->
+            val exists = path in byKey || legacy && byName[File(path).name]?.size == 1
+            require(exists) { "备份缺少附件：${File(path).name}" }
+        }
+    }
+
+    private fun readSelected(selected: JSONArray?): Set<String> = selected?.let { array ->
+        (0 until array.length()).map(array::getString).toSet()
+    } ?: emptySet()
+
+    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+        .digest(bytes).joinToString("") { "%02x".format(it) }
 }
