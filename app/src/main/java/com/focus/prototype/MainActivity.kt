@@ -35,6 +35,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -54,8 +55,9 @@ class MainActivity : ComponentActivity() {
   val apps = packageManager.queryIntentActivities(launch,0).filter { store.canRestrict(it.activityInfo.packageName) }.distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(packageManager).toString() }
   setContent {
     var page by remember { mutableIntStateOf(if(db.setting("import_draft").isNotBlank()) 5 else 0) }; var editor by remember { mutableStateOf(false) };var dataVersion by remember {mutableIntStateOf(0)};var rewardHistoryExpanded by remember {mutableStateOf(false)};var rewardControlsExpanded by remember {mutableStateOf(false)};var selectedRewardRecord by remember {mutableStateOf<String?>(null)};var taskFilter by remember { mutableIntStateOf(0) }
-    var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }; var editingTaskId by remember { mutableStateOf<String?>(null) };var taskActionTask by remember { mutableStateOf<Task?>(null) };var movingTask by remember { mutableStateOf<Task?>(null) };var deletingTask by remember { mutableStateOf<Task?>(null) };var allAchievements by remember { mutableStateOf(false) }; var gritAnalyticsTaskId by remember { mutableStateOf<String?>(null) }; var showContractDialog by remember { mutableStateOf(false) }
-    fun dismissTaskActions() { taskActionTask=null; movingTask=null; deletingTask=null }
+    var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }; var editingTaskId by remember { mutableStateOf<String?>(null) };var movingTask by remember { mutableStateOf<Task?>(null) };var deletingTask by remember { mutableStateOf<Task?>(null) };var allAchievements by remember { mutableStateOf(false) }; var gritAnalyticsTaskId by remember { mutableStateOf<String?>(null) }; var showContractDialog by remember { mutableStateOf(false) }
+    val taskActionScope = rememberCoroutineScope()
+    fun dismissTaskActions() { movingTask=null; deletingTask=null }
    LaunchedEffect(shareVersion) { if(shareVersion>0) { page=5;editor=false } }
    LaunchedEffect(Unit) { while(true) { db.settleToday();focusTimer.advance();if(now%10L==0L)db.checkpoint();now++; delay(1000) } }
    val tick = now + refresh; val today = db.day(); val c = remember(today,tick) { db.contract(today) }; val tasks = remember(today,refresh) { db.tasks(today) }; val continuing = remember(today,refresh) { db.runningTasks().filter { it.date != today } }
@@ -75,7 +77,9 @@ class MainActivity : ComponentActivity() {
         onFilter={taskFilter=it}, onAdd={dismissTaskActions();targetDay=today;editor=true},
         onPlan={dismissTaskActions();showContractDialog=true}, onSettings={dismissTaskActions();page=5},
         onDetails={taskDetailsId=it.id},
-        onLongPress={taskActionTask=it},
+        onEdit={editingTaskId=it.id;taskDetailsId=it.id},
+        onMove={task->taskActionScope.launch { delay(200); movingTask=task }},
+        onDelete={task->taskActionScope.launch { delay(200); deletingTask=task }},
        )
       } else if (!editor && screen == 2 && allAchievements) {
        AchievementsPage(db,refresh){allAchievements=false}
@@ -160,20 +164,19 @@ class MainActivity : ComponentActivity() {
        }
       }
       }
-      if(showContractDialog) androidx.compose.ui.window.Dialog(onDismissRequest={showContractDialog=false}) {
-       Surface(shape=RoundedCornerShape(28.dp),color=MaterialTheme.colorScheme.surface) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-         ContractEditor(db,c) { showContractDialog=false;refresh++ }
-         TextButton(onClick={showContractDialog=false},modifier=Modifier.align(Alignment.End)) { Text("稍后确认") }
-        }
-       }
-      }
-      taskActionTask?.let { task -> TaskActionMenu(task,onDismiss={taskActionTask=null},onEdit={taskActionTask=null;editingTaskId=task.id;taskDetailsId=task.id},onMove={taskActionTask=null;movingTask=task},onDetails={taskActionTask=null;taskDetailsId=task.id},onDelete={taskActionTask=null;deletingTask=task}) }
-      selectedRewardRecord?.let { record -> AlertDialog(onDismissRequest={selectedRewardRecord=null},title={Text("奖励记录详情")},text={Text(record)},confirmButton={TextButton(onClick={selectedRewardRecord=null}){Text("完成")}}) }
-      movingTask?.let { task -> TaskMoveDialog(task,db,onDismiss={movingTask=null},onMoved={if(focusTimer.taskId==task.id)focusTimer.finish();movingTask=null;refresh++}) }
-      deletingTask?.let { task -> TaskDeleteDialog(task,db,onDismiss={deletingTask=null},onDeleted={deletingTask=null;refresh++}) }
      }
     }
+     if(showContractDialog) androidx.compose.ui.window.Dialog(onDismissRequest={showContractDialog=false}) {
+      Surface(shape=RoundedCornerShape(28.dp),color=MaterialTheme.colorScheme.surface) {
+       Column(Modifier.fillMaxWidth().padding(16.dp)) {
+        ContractEditor(db,c) { showContractDialog=false;refresh++ }
+        TextButton(onClick={showContractDialog=false},modifier=Modifier.align(Alignment.End)) { Text("稍后确认") }
+       }
+      }
+     }
+     selectedRewardRecord?.let { record -> AlertDialog(onDismissRequest={selectedRewardRecord=null},title={Text("奖励记录详情")},text={Text(record)},confirmButton={TextButton(onClick={selectedRewardRecord=null}){Text("完成")}}) }
+     movingTask?.let { task -> TaskMoveDialog(task,db,onDismiss={movingTask=null},onMoved={if(focusTimer.taskId==task.id)focusTimer.finish();movingTask=null;refresh++}) }
+     deletingTask?.let { task -> TaskDeleteDialog(task,db,onDismiss={deletingTask=null},onDeleted={deletingTask=null;refresh++}) }
      val detailTask = remember(taskDetailsId,tick) { taskDetailsId?.let(db::task) }
       LaunchedEffect(taskDetailsId,detailTask) { if(taskDetailsId!=null && detailTask==null) taskDetailsId=null }
      if(detailTask!=null) TaskDetailSheet(

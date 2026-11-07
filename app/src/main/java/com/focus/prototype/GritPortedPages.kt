@@ -26,8 +26,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,6 +54,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
@@ -80,6 +83,14 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kizitonwose.calendar.compose.HorizontalCalendar
@@ -108,7 +119,9 @@ internal fun GritTaskListPage(
     onPlan: () -> Unit,
     onSettings: () -> Unit,
     onDetails: (Task) -> Unit,
-    onLongPress: (Task) -> Unit,
+    onEdit: (Task) -> Unit,
+    onMove: (Task) -> Unit,
+    onDelete: (Task) -> Unit,
 ) {
     val completed = tasks.count(Task::done)
     val filteredTasks = when (filter) {
@@ -175,7 +188,7 @@ internal fun GritTaskListPage(
                         )
                     }
                     itemsIndexed(continuing, key = { _, task -> "continue-${task.id}" }) { index, task ->
-                        GritTaskListCard(task, gritTaskShape(index, continuing.size), onDetails, onLongPress)
+                        GritTaskListCard(task, gritTaskShape(index, continuing.size), onDetails, onEdit, onMove, onDelete)
                     }
                 }
                 if (filteredTasks.isEmpty()) {
@@ -189,7 +202,7 @@ internal fun GritTaskListPage(
                     }
                 } else {
                     itemsIndexed(filteredTasks, key = { _, task -> task.id }) { index, task ->
-                        GritTaskListCard(task, gritTaskShape(index, filteredTasks.size), onDetails, onLongPress)
+                        GritTaskListCard(task, gritTaskShape(index, filteredTasks.size), onDetails, onEdit, onMove, onDelete)
                     }
                 }
             }
@@ -222,13 +235,11 @@ private fun GritTaskListCard(
     task: Task,
     shape: Shape,
     onDetails: (Task) -> Unit,
-    onLongPress: (Task) -> Unit,
+    onEdit: (Task) -> Unit,
+    onMove: (Task) -> Unit,
+    onDelete: (Task) -> Unit,
 ) {
-    val currentTask = rememberUpdatedState(task)
-    val currentOnDetails = rememberUpdatedState(onDetails)
-    val currentOnLongPress = rememberUpdatedState(onLongPress)
-    val onCardClick = remember { { currentOnDetails.value(currentTask.value) } }
-    val onCardLongClick = remember { { currentOnLongPress.value(currentTask.value) } }
+    var menuExpanded by remember(task.id) { mutableStateOf(false) }
     val cardContent by animateColorAsState(
         if (task.done) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSecondaryContainer,
         label = "grit-card-content",
@@ -238,20 +249,69 @@ private fun GritTaskListCard(
         label = "grit-card-background",
     )
     Card(
-        modifier = Modifier.combinedClickable(onClick = onCardClick, onLongClick = onCardLongClick).animateContentSize(),
+        modifier = Modifier
+            .semantics {
+                role = Role.Button
+                onClick(label = "查看任务详情") { onDetails(task); true }
+                onLongClick(label = "打开任务操作") { menuExpanded = true; true }
+            }
+            .pointerInput(task.id) {
+                val menuAreaPx = 56.dp.toPx()
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    if (down.position.x < size.width - menuAreaPx) {
+                        var tracking = true
+                        while (tracking) {
+                            val event = awaitPointerEvent(PointerEventPass.Main)
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            val dx = change.position.x - down.position.x
+                            val dy = change.position.y - down.position.y
+                            if (dx * dx + dy * dy > viewConfiguration.touchSlop * viewConfiguration.touchSlop) {
+                                tracking = false
+                            } else if (!change.pressed) {
+                                val heldMillis = change.uptimeMillis - down.uptimeMillis
+                                if (heldMillis >= viewConfiguration.longPressTimeoutMillis) {
+                                    menuExpanded = true
+                                } else {
+                                    onDetails(task)
+                                }
+                                tracking = false
+                            }
+                        }
+                    }
+                }
+            }
+            .animateContentSize(),
         colors = CardDefaults.cardColors(containerColor = cardBackground, contentColor = cardContent),
         shape = shape,
     ) {
         // Grit TaskCard's list row is intentionally title-only; category and
-        // focus details stay in the existing detail sheet so the card keeps
-        // the original compact proportion.
-        Text(
-            task.title,
-            modifier = Modifier.fillMaxWidth().padding(16.dp).basicMarquee(),
-            maxLines = 1,
-            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
-            textDecoration = if (task.done) TextDecoration.LineThrough else TextDecoration.None,
-        )
+        // focus details stay in the existing detail sheet. The trailing menu
+        // button is the accessible alternative to the card's long press.
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                task.title,
+                modifier = Modifier.weight(1f).padding(vertical = 16.dp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                textDecoration = if (task.done) TextDecoration.LineThrough else TextDecoration.None,
+            )
+            Box {
+                IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(40.dp).semantics { contentDescription = "任务操作" }) {
+                    Text("⋮", fontSize = 24.sp, color = cardContent, maxLines = 1)
+                }
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    if (!task.done) DropdownMenuItem(text = { Text("编辑任务") }, onClick = { menuExpanded = false; onEdit(task) })
+                    if (!task.done) DropdownMenuItem(text = { Text("调整日期") }, onClick = { menuExpanded = false; onMove(task) })
+                    DropdownMenuItem(text = { Text("查看详情") }, onClick = { menuExpanded = false; onDetails(task) })
+                    if (!task.done) DropdownMenuItem(text = { Text("删除任务") }, onClick = { menuExpanded = false; onDelete(task) })
+                }
+            }
+        }
     }
 }
 

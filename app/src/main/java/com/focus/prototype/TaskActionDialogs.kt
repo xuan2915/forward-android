@@ -1,12 +1,18 @@
 package com.focus.prototype
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -21,33 +27,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import java.time.LocalDate
-
-@Composable
-fun TaskActionMenu(
-    task:Task,
-    onDismiss:()->Unit,
-    onEdit:()->Unit,
-    onMove:()->Unit,
-    onDetails:()->Unit,
-    onDelete:()->Unit,
-) {
-    Dialog(onDismissRequest=onDismiss, properties=DialogProperties(dismissOnClickOutside=false)) {
-        Surface(shape=MaterialTheme.shapes.extraLarge,color=MaterialTheme.colorScheme.surfaceContainerLow) {
-            Column(Modifier.fillMaxWidth().padding(20.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
-                Text(task.title,style=MaterialTheme.typography.titleLarge,modifier=Modifier.padding(bottom=8.dp))
-                if(!task.done) TextButton(onClick=onEdit,modifier=Modifier.fillMaxWidth()) {Text("编辑任务")}
-                if(!task.done) TextButton(onClick=onMove,modifier=Modifier.fillMaxWidth()) {Text("调整日期")}
-                TextButton(onClick=onDetails,modifier=Modifier.fillMaxWidth()) {Text("查看详情")}
-                if(!task.done) TextButton(onClick=onDelete,modifier=Modifier.fillMaxWidth()) {Text("删除任务",color=MaterialTheme.colorScheme.error)}
-                TextButton(onClick=onDismiss,modifier=Modifier.fillMaxWidth()) {Text("取消")}
-            }
-        }
-    }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,17 +46,23 @@ fun TaskMoveDialog(task:Task,db:Database,onDismiss:()->Unit,onMoved:(String)->Un
     val reasonRequired=db.contract(task.date).confirmed&&task.required
     var reason by remember(task.id){mutableStateOf("")}
     var error by remember(task.id){mutableStateOf("")}
-    DatePickerDialog(
-        onDismissRequest=onDismiss,
-        confirmButton={TextButton(enabled=selected!=null&&selected!=LocalDate.parse(task.date)&&(!reasonRequired||reason.isNotBlank()),onClick={selected?.let{date->runCatching{db.moveTask(task,date.toString(),reason.trim())}.onSuccess(onMoved).onFailure{error=it.message?:"无法调整任务日期。"}}}){Text("移至此日")} },
-        dismissButton={TextButton(onClick=onDismiss){Text("取消")}},
-    ) {
-        Column {
-            Text("选择新的任务日期",modifier=Modifier.padding(start=24.dp,top=14.dp),style=MaterialTheme.typography.titleMedium)
-            DatePicker(state,showModeToggle=false)
-            if(reasonRequired) OutlinedTextField(reason,onValueChange={reason=it},label={Text("计划变更原因")},modifier=Modifier.fillMaxWidth().padding(horizontal=24.dp).padding(bottom=16.dp))
-            if(error.isNotBlank()) Text(error,modifier=Modifier.padding(horizontal=24.dp).padding(bottom=8.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.error)
-            Text("延期只会移动未完成任务，不会记为完成或发放奖励。",modifier=Modifier.padding(horizontal=24.dp).padding(bottom=12.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha=0.58f)).clickable(onClick=onDismiss), contentAlignment=Alignment.Center) {
+        Surface(
+            modifier=Modifier.fillMaxWidth().padding(horizontal=18.dp).heightIn(max=700.dp).clickable(onClick={}),
+            shape=MaterialTheme.shapes.extraLarge,
+            color=MaterialTheme.colorScheme.surfaceContainerLow,
+        ) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                Text("选择新的任务日期", style=MaterialTheme.typography.titleMedium)
+                DatePicker(state, showModeToggle=false)
+                if(reasonRequired) OutlinedTextField(reason,onValueChange={reason=it},label={Text("计划变更原因")},modifier=Modifier.fillMaxWidth())
+                if(error.isNotBlank()) Text(error,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.error)
+                Text("延期只会移动未完成任务，不会记为完成或发放奖励。",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.End) {
+                    TextButton(onClick=onDismiss) { Text("取消") }
+                    TextButton(enabled=selected!=null&&selected!=LocalDate.parse(task.date)&&(!reasonRequired||reason.isNotBlank()),onClick={selected?.let{date->runCatching{db.moveTask(task,date.toString(),reason.trim())}.onSuccess(onMoved).onFailure{error=it.message?:"无法调整任务日期。"}}}) { Text("移至此日") }
+                }
+            }
         }
     }
 }
@@ -82,14 +71,21 @@ fun TaskMoveDialog(task:Task,db:Database,onDismiss:()->Unit,onMoved:(String)->Un
 fun TaskDeleteDialog(task:Task,db:Database,onDismiss:()->Unit,onDeleted:()->Unit) {
     val reasonRequired=db.contract(task.date).confirmed
     var reason by remember(task.id){mutableStateOf("")}
-    AlertDialog(
-        onDismissRequest=onDismiss,
-        title={Text("删除这项任务？")},
-        text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text("只删除未完成记录。${if(reasonRequired)"已确认的计划会保留变更原因。" else ""}")
-            if(reasonRequired) OutlinedTextField(reason,onValueChange={reason=it},label={Text("删除原因")},modifier=Modifier.fillMaxWidth())
-        }},
-        confirmButton={TextButton(enabled=!reasonRequired||reason.isNotBlank(),onClick={db.deleteTask(task,reason.trim());onDeleted()}){Text("删除")}},
-        dismissButton={TextButton(onClick=onDismiss){Text("保留")}},
-    )
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha=0.58f)).clickable(onClick=onDismiss), contentAlignment=Alignment.Center) {
+        Surface(
+            modifier=Modifier.fillMaxWidth().padding(horizontal=24.dp).clickable(onClick={}),
+            shape=MaterialTheme.shapes.extraLarge,
+            color=MaterialTheme.colorScheme.surfaceContainerLow,
+        ) {
+            Column(Modifier.padding(20.dp), verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                Text("删除这项任务？", style=MaterialTheme.typography.titleLarge)
+                Text("只删除未完成记录。${if(reasonRequired)"已确认的计划会保留变更原因。" else ""}")
+                if(reasonRequired) OutlinedTextField(reason,onValueChange={reason=it},label={Text("删除原因")},modifier=Modifier.fillMaxWidth())
+                Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.End) {
+                    TextButton(onClick=onDismiss) { Text("保留") }
+                    TextButton(enabled=!reasonRequired||reason.isNotBlank(),onClick={db.deleteTask(task,reason.trim());onDeleted()}) { Text("删除") }
+                }
+            }
+        }
+    }
 }
