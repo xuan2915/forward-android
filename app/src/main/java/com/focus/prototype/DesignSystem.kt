@@ -48,6 +48,9 @@ object AppColors {
  var AccentInk = darkColorScheme().onPrimary
  var AccentWash = darkColorScheme().primaryContainer
  var Warning = darkColorScheme().error
+ // Calendar misses use a low-saturation rose so they read as history, not an alert.
+ val Missed = Color(0xFF49373B)
+ val MissedInk = Color(0xFFC69A9F)
  fun apply(s:androidx.compose.material3.ColorScheme) {
 Background=s.background
 Surface=s.surfaceContainer

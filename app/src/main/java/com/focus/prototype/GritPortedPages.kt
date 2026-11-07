@@ -511,7 +511,8 @@ private fun GritHabitCalendarDay(day: CalendarDay, today: LocalDate, selected: L
     val inside = day.position == DayPosition.MonthDate
     val fill = when (state) {
         "完成" -> MaterialTheme.colorScheme.primary
-        "未完成" -> MaterialTheme.colorScheme.secondaryContainer
+        "休息" -> AppColors.Border
+        "未完成" -> AppColors.Missed
         else -> MaterialTheme.colorScheme.surfaceContainer
     }
     Box(
@@ -526,6 +527,8 @@ private fun GritHabitCalendarDay(day: CalendarDay, today: LocalDate, selected: L
             color = when {
                 !inside -> Color.Transparent
                 state == "完成" -> MaterialTheme.colorScheme.onPrimary
+                state == "未完成" -> AppColors.MissedInk
+                state == "休息" -> AppColors.Muted
                 else -> MaterialTheme.colorScheme.onSurface
             },
         )

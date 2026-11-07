@@ -92,8 +92,9 @@ fun GritWeeklyHeatMap(today: LocalDate, history: Map<String, String>, onDateSele
                                 else -> StreakPosition.ISOLATED
                             }
                             val color = when (status) {
-                                "完成" -> MaterialTheme.colorScheme.primary
-                                "休息" -> MaterialTheme.colorScheme.surfaceContainerHigh
+                                "完成" -> AppColors.Accent
+                                "休息" -> AppColors.Border
+                                "未完成" -> AppColors.Missed
                                 else -> MaterialTheme.colorScheme.surface
                             }
                             Box(
@@ -106,7 +107,12 @@ fun GritWeeklyHeatMap(today: LocalDate, history: Map<String, String>, onDateSele
                                 Text(
                                     date.dayOfMonth.toString(),
                                     style = MaterialTheme.typography.bodyMedium.copy(fontFamily = com.focus.prototype.gritFontRounded()),
-                                    color = if (status == "完成") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = if (status == null) .55f else 1f),
+                                    color = when (status) {
+                                        "完成" -> AppColors.AccentInk
+                                        "未完成" -> AppColors.MissedInk
+                                        "休息" -> AppColors.Muted
+                                        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
+                                    },
                                 )
                             }
                         }
