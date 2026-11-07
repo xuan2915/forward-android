@@ -124,7 +124,7 @@ class FocusTimer(
         db.setSetting("focus_deadline", (elapsedNow() + breakMillis).toString())
         db.setSetting("focus_wall_deadline", (wallNow() + breakMillis).toString())
         rememberBoot()
-        db.setSetting("focus_notice", "休息一下，回来继续。")
+        db.setSetting("focus_notice", "休息一下")
     }
 
     fun finish() {
@@ -166,7 +166,7 @@ class FocusTimer(
             db.setSetting("focus_remaining", "0")
             db.setSetting("focus_deadline", "0")
             db.setSetting("focus_wall_deadline", "0")
-            db.setSetting("focus_notice", "休息结束，回来继续。")
+            db.setSetting("focus_notice", "休息结束")
         } else {
             db.task(taskId)?.let(db::pause)
             db.setSetting("focus_segment_elapsed", "0")
@@ -176,13 +176,13 @@ class FocusTimer(
                 db.setSetting("focus_remaining", mode.breakMillis.toString())
                 db.setSetting("focus_deadline", (elapsedNow() + mode.breakMillis).toString())
                 db.setSetting("focus_wall_deadline", (wallNow() + mode.breakMillis).toString())
-                db.setSetting("focus_notice", "这一段，完成了。")
+                db.setSetting("focus_notice", "本轮完成")
             } else {
                 db.setSetting("focus_phase", "ready")
                 db.setSetting("focus_remaining", "0")
                 db.setSetting("focus_deadline", "0")
                 db.setSetting("focus_wall_deadline", "0")
-                db.setSetting("focus_notice", "这一段，完成了。")
+                db.setSetting("focus_notice", "本轮完成")
             }
         }
         rememberBoot()

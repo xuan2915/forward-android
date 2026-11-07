@@ -69,7 +69,7 @@ fun resign(root:org.json.JSONObject,payload:org.json.JSONObject):String { val bo
    }
    test("focus presets, pause restore, rest countdown and free timer") {
     val other="focus-clock.db";context.deleteDatabase(other);var mono=100000L;var wall=1_800_000_000_000L;var d=Database(context,other){now};d.addTask(d.day(),"timer",true,0,"行动型","",0,0,"once");val task=d.tasks().single();d.confirm(task.date,false,0,0);var timer=FocusTimer(d,{mono},{wall})
-    try{check(timer.mode==FocusMode.POMODORO);timer.begin(task);check(timer.remaining()==25*60_000L);mono+=60_000;wall+=60_000;timer.pause();check(timer.phase=="paused"&&timer.remaining()==24*60_000L);val saved=d.elapsed(d.task(task.id)!!);d.close();d=Database(context,other){now};timer=FocusTimer(d,{mono},{wall});check(timer.phase=="paused"&&timer.remaining()==24*60_000L);timer.resume(d.task(task.id)!!);mono+=30_000;wall+=30_000;timer.takeBreak();check(timer.phase=="break"&&timer.remaining()==5*60_000L);check(d.task(task.id)!!.runningSince==0L);mono+=5*60_000;wall+=5*60_000;check(timer.advance());check(timer.phase=="ready"&&timer.notice=="休息结束，回来继续。");timer.dismissNotice();timer.selectMode(FocusMode.DEEP);timer.begin(d.task(task.id)!!);check(timer.remaining()==50*60_000L);timer.finish();timer.selectMode(FocusMode.FREE);timer.begin(d.task(task.id)!!);mono+=90_000;wall+=90_000;check(timer.elapsed()==90_000L&&formatFocusTime(timer.elapsed())=="01:30");timer.pause();check(timer.elapsed()==90_000L);timer.finish();check(d.elapsed(d.task(task.id)!!) >= saved)}finally{d.close()}
+     try{check(timer.mode==FocusMode.POMODORO);timer.begin(task);check(timer.remaining()==25*60_000L);mono+=60_000;wall+=60_000;timer.pause();check(timer.phase=="paused"&&timer.remaining()==24*60_000L);val saved=d.elapsed(d.task(task.id)!!);d.close();d=Database(context,other){now};timer=FocusTimer(d,{mono},{wall});check(timer.phase=="paused"&&timer.remaining()==24*60_000L);timer.resume(d.task(task.id)!!);mono+=30_000;wall+=30_000;timer.takeBreak();check(timer.phase=="break"&&timer.remaining()==5*60_000L);check(d.task(task.id)!!.runningSince==0L);mono+=5*60_000;wall+=5*60_000;check(timer.advance());check(timer.phase=="ready"&&timer.notice=="休息结束");timer.dismissNotice();timer.selectMode(FocusMode.DEEP);timer.begin(d.task(task.id)!!);check(timer.remaining()==50*60_000L);timer.finish();timer.selectMode(FocusMode.FREE);timer.begin(d.task(task.id)!!);mono+=90_000;wall+=90_000;check(timer.elapsed()==90_000L&&formatFocusTime(timer.elapsed())=="01:30");timer.pause();check(timer.elapsed()==90_000L);timer.finish();check(d.elapsed(d.task(task.id)!!) >= saved)}finally{d.close()}
    }
    test("past rewards cannot be resurrected") {check(db.balance("video","2026-10-30")==0L)}
    test("rest bridges streak, emergency earns nothing, missed day resets") {
@@ -121,8 +121,18 @@ fun resign(root:org.json.JSONObject,payload:org.json.JSONObject):String { val bo
     val other="achievement-categories.db";context.deleteDatabase(other);var clock=LocalDateTime.parse("2026-11-06T12:00:00");val d=Database(context,other){clock}
     try {
      val date=d.day();d.addTask(date,"first real task",true,0,"行动型","",0,0,"once");d.confirm(date,false,0,0);d.complete(d.tasks().single())
-     val items=achievementList(d);val first=items.first{it.title=="第一步"};check(first.category=="任务完成"&&first.earned&&first.earnedDate==date)
-     check(items.map{it.category}.toSet()==setOf("任务完成","连续坚持","专注积累"));check(items.filter{!it.earned}.all{it.progress<it.target})
+     val items=achievementList(d);val first=items.first{it.title=="第一步"};check(first.category=="任务积累"&&first.earned&&first.earnedDate==date)
+     check(items.map{it.category}.toSet()==setOf("任务积累","连续记录","专注积累"));check(items.filter{!it.earned}.all{it.progress<it.target})
+    } finally {d.close()}
+   }
+   test("new achievement notice is shown once after a real unlock") {
+    val other="achievement-notices.db";context.deleteDatabase(other);val d=Database(context,other){now}
+    try {
+     initializeAchievementNotices(d);check(nextUnseenAchievement(d)==null)
+     val date=d.day();d.addTask(date,"first task",true,0,"行动型","",0,0,"once");d.confirm(date,false,0,0);d.complete(d.tasks().single())
+     val unlocked=nextUnseenAchievement(d);check(unlocked!=null&&unlocked.id=="task.first"&&unlocked.earnedDate==date)
+     d.setSetting("achievement_seen_${unlocked.id}","true");check(nextUnseenAchievement(d)==null)
+     initializeAchievementNotices(d);check(nextUnseenAchievement(d)==null)
     } finally {d.close()}
    }
    test("completed legacy mandatory task receives one current-day task reward") {

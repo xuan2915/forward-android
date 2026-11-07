@@ -123,7 +123,7 @@ fun TaskDetailSheet(
                     task.done -> "已完成"
                     active -> "专注中"
                     paused -> "已暂停"
-                    else -> "待完成"
+                    else -> "待开始"
                 }, active = task.done || active)
             }
 
@@ -160,12 +160,12 @@ fun TaskDetailSheet(
                 } else if (!task.required && !task.claimed) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("领取一项奖励", style = MaterialTheme.typography.titleMedium)
-                        Text("奖励只能领取一次。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                        Text("每项选做奖励限领一次", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (task.rewardMinutes > 0) SecondaryAction("${task.rewardMinutes} 分钟", { db.claim(task, "video"); onChanged() }, enabled = db.eligible())
                             if (task.rewardGames > 0) SecondaryAction("${task.rewardGames} 局", { db.claim(task, "game"); onChanged() }, enabled = db.eligible())
                         }
-                        if (!db.eligible()) Text("完成全部必做任务后，可领取选做奖励。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                        if (!db.eligible()) Text("完成今日必做任务后可领取", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
                     }
                 } else if (task.claimed) {
                     Text("奖励已领取", style = MaterialTheme.typography.bodyMedium, color = AppColors.Muted)
@@ -191,7 +191,7 @@ fun TaskDetailSheet(
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("完成证明", style = MaterialTheme.typography.titleMedium)
-                    Text(if(db.setting("proof_no_save_${task.id}")=="true") "你选择的文件只用于提交证明，不会保存在本机。" else "照片和附件保存在本机，提交后用于完成自检。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                    Text(if(db.setting("proof_no_save_${task.id}")=="true") "仅提交证明 · 不在本机保存" else "照片和附件保存在本机，用于完成自检", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
                     ProofActions(task, db, onChanged)
                 }
 
@@ -216,8 +216,8 @@ fun TaskDetailSheet(
                         Text(
                             when {
                                 elapsed < task.minutes * 60_000L -> "还需专注 ${focusDuration((task.minutes * 60_000L - elapsed).coerceAtLeast(0))}"
-                                task.mode != "行动型" && task.evidence.isBlank() -> "请先添加一张照片或附件证明。"
-                                else -> "请确认任务已达到预先约定的标准。"
+                                task.mode != "行动型" && task.evidence.isBlank() -> "请先添加照片或附件证明"
+                                else -> "请确认已达到预设完成标准"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = AppColors.Muted,
@@ -236,14 +236,14 @@ fun TaskDetailSheet(
     if (resetting) AlertDialog(
         onDismissRequest = { resetting = false },
         title = { Text("重新开始这次专注？") },
-        text = { Text("这项任务已计入的专注时长将清零，完成证明会保留。") },
+        text = { Text("已计入的专注时长将清零 · 完成证明保留") },
         confirmButton = { TextButton(onClick = { db.restart(task); resetting = false; onChanged() }) { Text("清零计时") } },
         dismissButton = { TextButton(onClick = { resetting = false }) { Text("取消") } },
     )
     if (revoking) AlertDialog(
         onDismissRequest = { revoking = false },
         title = { Text("撤销任务完成？") },
-        text = { Text("撤销后会按可用余额冲正已领取奖励；已使用的额度无法追回。") },
+        text = { Text("将按可用余额冲回奖励 · 已使用额度不追回") },
         confirmButton = { TextButton(onClick = { db.revoke(task); revoking = false; onChanged() }) { Text("确认撤销") } },
         dismissButton = { TextButton(onClick = { revoking = false }) { Text("取消") } },
     )

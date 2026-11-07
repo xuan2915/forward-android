@@ -57,10 +57,10 @@ fun TaskMoveDialog(task:Task,db:Database,onDismiss:()->Unit,onMoved:(String)->Un
                 DatePicker(state, showModeToggle=false)
                 if(reasonRequired) OutlinedTextField(reason,onValueChange={reason=it},label={Text("计划变更原因")},modifier=Modifier.fillMaxWidth())
                 if(error.isNotBlank()) Text(error,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.error)
-                Text("延期只会移动未完成任务，不会记为完成或发放奖励。",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("只调整未完成任务 · 不记为完成，也不发放奖励",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.End) {
                     TextButton(onClick=onDismiss) { Text("取消") }
-                    TextButton(enabled=selected!=null&&selected!=LocalDate.parse(task.date)&&(!reasonRequired||reason.isNotBlank()),onClick={selected?.let{date->runCatching{db.moveTask(task,date.toString(),reason.trim())}.onSuccess(onMoved).onFailure{error=it.message?:"无法调整任务日期。"}}}) { Text("移至此日") }
+                    TextButton(enabled=selected!=null&&selected!=LocalDate.parse(task.date)&&(!reasonRequired||reason.isNotBlank()),onClick={selected?.let{date->runCatching{db.moveTask(task,date.toString(),reason.trim())}.onSuccess(onMoved).onFailure{error=it.message?:"无法调整任务日期"}}}) { Text("移至此日") }
                 }
             }
         }
@@ -79,7 +79,7 @@ fun TaskDeleteDialog(task:Task,db:Database,onDismiss:()->Unit,onDeleted:()->Unit
         ) {
             Column(Modifier.padding(20.dp), verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 Text("删除这项任务？", style=MaterialTheme.typography.titleLarge)
-                Text("只删除未完成记录。${if(reasonRequired)"已确认的计划会保留变更原因。" else ""}")
+                Text(if(reasonRequired) "删除未完成记录 · 已确认的计划会保留变更原因" else "只删除未完成记录")
                 if(reasonRequired) OutlinedTextField(reason,onValueChange={reason=it},label={Text("删除原因")},modifier=Modifier.fillMaxWidth())
                 Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.End) {
                     TextButton(onClick=onDismiss) { Text("保留") }

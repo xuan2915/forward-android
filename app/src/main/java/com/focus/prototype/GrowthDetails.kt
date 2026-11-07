@@ -238,7 +238,7 @@ private fun AuditLogSection(db: Database, refreshKey: Int) {
         }
         AnimatedVisibility(expanded) {
             QuietSurface {
-                if (records.isEmpty()) Text("计划调整、睡眠例外和应用保护记录会显示在这里。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                if (records.isEmpty()) Text("计划调整、睡眠例外和应用保护记录会显示在这里", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
                 records.forEach { record ->
                     Text(
                         "${record.date}  ·  ${record.detail}",
@@ -283,7 +283,7 @@ private fun TrendSection(db: Database, today: LocalDate) {
                 }
             }
             if (total > 0) DailyCompletionBars(stats)
-            else Text("最近 7 天还没有任务记录。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+            else Text("最近 7 天还没有任务记录", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
         }
 
         GritAnalyticsHeader("近 30 天", icon = R.drawable.grit_chart)

@@ -131,7 +131,7 @@ object Backup {
     fun restore(context: Context, db: Database, text: String) {
         val parsed = parse(text)
         require(parsed.databaseVersion <= db.writableDatabase.version) {
-            "此备份来自更新版本的应用，请先升级后再恢复。"
+            "此备份由较新版本创建，请先升级后再恢复"
         }
         validateRows(parsed.data, db.writableDatabase)
         val references = referencedPaths(parsed.data)
@@ -203,10 +203,10 @@ object Backup {
         val root = JSONObject(text)
         val version = root.getInt("version")
         if (root.optString("format") == FORMAT) {
-            require(version <= CURRENT_VERSION) { "该备份由更新版本的应用创建，请先升级。" }
-            require(version == CURRENT_VERSION) { "备份格式无法识别。" }
+            require(version <= CURRENT_VERSION) { "此备份由较新版本创建，请先升级后再恢复" }
+            require(version == CURRENT_VERSION) { "无法识别备份格式" }
             val payloadText = root.getString("payload")
-            require(sha256(payloadText.toByteArray(Charsets.UTF_8)) == root.getString("sha256")) { "备份校验失败，文件可能已损坏或被修改。" }
+            require(sha256(payloadText.toByteArray(Charsets.UTF_8)) == root.getString("sha256")) { "备份校验失败，文件可能已损坏或被修改" }
             val payload = JSONObject(payloadText)
             val assets = parseAssets(payload.optJSONArray("assets") ?: JSONArray(), "key")
             val data = payload.getJSONObject("data")
@@ -224,13 +224,13 @@ object Backup {
             )
         }
 
-        require(version in 1 until CURRENT_VERSION) { "备份版本不受支持。" }
+        require(version in 1 until CURRENT_VERSION) { "不支持此备份版本" }
         val data = root.getJSONObject("data")
         validateData(data)
         val legacy = root.optJSONObject("files") ?: JSONObject()
         val assets = mutableListOf<Asset>()
         legacy.keys().forEach { name ->
-            require(name == File(name).name && name != "." && name != "..") { "备份附件名称无效。" }
+            require(name == File(name).name && name != "." && name != "..") { "备份附件名称无效" }
             val bytes = Base64.decode(legacy.getString(name), Base64.DEFAULT)
             assets.add(Asset(name, name, bytes))
         }
@@ -252,13 +252,13 @@ object Backup {
             val item = array.getJSONObject(index)
             val key = item.getString(keyName)
             val name = item.getString("name")
-            require(key.isNotBlank() && name == File(name).name && name != "." && name != "..") { "备份附件信息无效。" }
+            require(key.isNotBlank() && name == File(name).name && name != "." && name != "..") { "备份附件信息无效" }
             val bytes = Base64.decode(item.getString("content"), Base64.DEFAULT)
             val digest = sha256(bytes)
             require(digest == item.getString("sha256") && bytes.size.toLong() == item.getLong("length")) { "附件校验失败：$name" }
             add(Asset(key, name, bytes))
         }
-        require(map { it.key }.toSet().size == size) { "备份中有重复的附件记录。" }
+        require(map { it.key }.toSet().size == size) { "备份中有重复的附件记录" }
     }
 
     private fun validateData(data: JSONObject) {

@@ -80,9 +80,9 @@ class BlockOverlayActivity : ComponentActivity() {
         panel.addView(label("自律 · 娱乐时间", 12f, 0xffa1a4a7.toInt(), true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(22) })
         panel.addView(label(if (exhausted) "娱乐额度已用完" else "先完成一项必做任务", 29f, 0xfff1f0ed.toInt(), true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         val reason=when {
-            nextReward!=null -> "完成「${nextReward.title}」后，将获得 ${if(blockedPackage in Store.games)"${nextReward.rewardGames} 局游戏奖励" else "${nextReward.rewardMinutes} 分钟视频时间"}。"
-            exhausted -> "完成下一项带有奖励的必做任务后，会继续发放对应额度。"
-            else -> "在今日任务中为必做任务设置娱乐奖励，完成后即可使用。"
+            nextReward!=null -> "完成「${nextReward.title}」后获得 ${if(blockedPackage in Store.games)"${nextReward.rewardGames} 局游戏奖励" else "${nextReward.rewardMinutes} 分钟视频时间"}"
+            exhausted -> "完成下一项有奖励的必做任务，获得对应额度"
+            else -> "在今日任务中设置必做奖励，完成后即可使用"
         }
         panel.addView(label(reason, 16f, 0xffa1a4a7.toInt()), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(25) })
         panel.addView(label("${db.balance("video") / 60000}", 42f, 0xfff1f0ed.toInt()), LinearLayout.LayoutParams(-1, -2))

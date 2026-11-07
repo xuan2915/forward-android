@@ -13,4 +13,19 @@ No source code from Jetsnack is bundled. Calendar and Vico are runtime dependenc
 - compose-lab by 2026 Dimitris Vlachos, MIT: adapted TypewriterDemo BubbleGrow non-bouncing content-size spring. Other components studied only.
 - Grit TaskCard.kt adapted in GritTaskCard.kt; see Grit-PORT.md.
 
+## Achievement visual resources
+
+- Achievement medals in `app/src/main/java/com/focus/prototype/Achievements.kt` are original Compose Canvas drawings created for this app; no icon artwork or animation assets were copied.
+- Jetpack Compose animation APIs from the existing AndroidX Compose BOM `2024.12.01` are used for medal reveal, halo, and status changes. Project toolchain: Kotlin `2.0.21`, Compose BOM `2024.12.01`, AGP `8.7.3`.
+- No additional animation or icon dependency was added. Evaluated options:
+
+| Project | Revision / version reviewed | License | Use in this release |
+| --- | --- | --- | --- |
+| [Lottie Android](https://github.com/airbnb/lottie-android) | `6.7.1` | Apache-2.0 | Not included; vector animation playback is unnecessary for the locally drawn medal reveal |
+| [Konfetti](https://github.com/DanielMartinus/Konfetti) | `2.2.0` | ISC | Not included; particle effects are intentionally not used for ordinary achievements |
+| [Game-icons](https://github.com/game-icons/icons) | Repository checked `2026-11-07` | CC BY 3.0 or CC0, per asset | Not included; each CC BY icon requires its own author attribution |
+| [Compose Phosphor Icons](https://github.com/adamglin0/compose-phosphor-icon) | README checked; published artifact `2.1.0` | MIT | Not included; achievement badges need custom medal silhouettes rather than general-purpose icons |
+
+No external animation asset is loaded. The current Compose version supports the native animation APIs used here, so adding a playback or particle library would increase app size without improving this interaction.
+
 Motion source revisions: compose-animations https://github.com/skydoves/compose-animations at eb51389891c303a0ad79c73525bd97acfdf96547; compose-lab https://github.com/DimiVlachos/compose-lab at bd43f2e4129592a1de93cb1570548b7b50ad445a.

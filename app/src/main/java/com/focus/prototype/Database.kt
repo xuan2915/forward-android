@@ -238,7 +238,7 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
    require(!fresh.done && !contract(targetDay).confirmed && (!frozen || !fresh.required || reason.isNotBlank()))
    val source=db.rawQuery("SELECT template_id,recurrence,origin FROM tasks WHERE id=?",arrayOf(task.id)).use{it.moveToFirst();Triple(it.getString(0),it.getString(1),it.getString(2))}
    val duplicate=db.rawQuery("SELECT id,template_id,done,elapsed,running_since,evidence,claimed FROM tasks WHERE day=? AND id NOT IN (SELECT source_id FROM task_moves) AND (template_id=? OR lower(trim(title))=lower(trim(?))) LIMIT 1",arrayOf(targetDay,source.first,fresh.title)).use { c -> if(c.moveToFirst()) listOf(c.getString(0),c.getString(1),c.getInt(2).toString(),c.getLong(3).toString(),c.getLong(4).toString(),c.getString(5),c.getInt(6).toString()) else null }
-   if(duplicate!=null) require(duplicate[1]==source.first && duplicate[2]=="0" && duplicate[3]=="0" && duplicate[4]=="0" && duplicate[5].isBlank() && duplicate[6]=="0") { "目标日期已有同一任务或同名任务，且已有进度，不能重复迁入。" }
+   if(duplicate!=null) require(duplicate[1]==source.first && duplicate[2]=="0" && duplicate[3]=="0" && duplicate[4]=="0" && duplicate[5].isBlank() && duplicate[6]=="0") { "目标日期已有同一任务或同名任务，且已有进度，不能重复迁入" }
    pause(fresh)
    val reusableTarget=duplicate?.get(0)
    val targetId=reusableTarget?:UUID.randomUUID().toString()

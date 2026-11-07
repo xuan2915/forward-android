@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -56,6 +57,7 @@ internal fun SleepCard(db:Database,refreshKey:Int,onChanged:()->Unit) {
     var readingHealth by remember { mutableStateOf(false) }
     var healthSessions by remember { mutableStateOf(emptyList<HealthSleepImport>()) }
     var importedSession by remember { mutableStateOf<HealthSleepImport?>(null) }
+    var sleepRulesExpanded by remember { mutableStateOf(false) }
     LaunchedEffect(selectedDate,importedSession,refreshKey) {
         importedSession?.takeIf { it.date==selectedDate }?.let { session ->
             bedtime=session.bedtime
@@ -70,22 +72,31 @@ internal fun SleepCard(db:Database,refreshKey:Int,onChanged:()->Unit) {
             runCatching { readHealthSleepSessions(context) }
                 .onSuccess { sessions ->
                     healthSessions=sessions
-                    healthMessage=if(sessions.isEmpty()) "Health Connect 中没有可读取的睡眠记录。OPPO 健康国行版可能没有向 Health Connect 同步；这不代表没有睡眠数据。" else "已读取 ${sessions.size} 条记录。请选择一条并核对后再保存。"
+                    healthMessage=if(sessions.isEmpty()) "没有可导入记录 · 也可以手动填写" else "读取到 ${sessions.size} 条记录 · 选中后核对并保存"
                 }
-                .onFailure { healthMessage="读取失败：${it.message?:"Health Connect 暂不可用"}" }
+            .onFailure { healthMessage="读取失败：${it.message?:"Health Connect 暂不可用"}" }
             readingHealth=false
         }
     }
     val sleepPermissionLauncher=rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->
-        if(sleepReadPermission in granted) loadHealthSessions() else healthMessage="未授权读取睡眠数据，手动记录仍可使用。"
+        if(sleepReadPermission in granted) loadHealthSessions() else healthMessage="未授权读取 · 可继续手动记录"
     }
     QuietSurface {
         Text("睡眠记录",style=MaterialTheme.typography.titleLarge)
-        Text("目标：${targets[0]} 前就寝 · ${targets[1]} 前起床。只按你确认的手动记录结算，不会把手机静置当作睡着。扣减会从之后发放的奖励中抵扣，不追回已使用额度。",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
-        Text("健康平台读取（可选）",style=MaterialTheme.typography.labelLarge)
-        Text("只读取 Health Connect 已有的睡眠时段，不会自动判定或结算。国行 OPPO 健康若未同步到 Health Connect，这里不会显示记录。",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
-        PrimaryAction(if(readingHealth)"正在读取…" else "读取 Health Connect 睡眠记录",{
-            if(HealthConnectClient.getSdkStatus(context)!=HealthConnectClient.SDK_AVAILABLE) healthMessage="此设备上的 Health Connect 当前不可用或需要更新。"
+        Text("${targets[0]} 前就寝 · ${targets[1]} 前起床",style=MaterialTheme.typography.titleMedium,color=AppColors.Text)
+        Text("手动确认 · 未达标将扣减后续奖励",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
+        TextButton(onClick={sleepRulesExpanded=!sleepRulesExpanded}) { Text(if(sleepRulesExpanded) "收起睡眠规则" else "查看睡眠规则") }
+        androidx.compose.animation.AnimatedVisibility(sleepRulesExpanded, enter=androidx.compose.animation.expandVertically(tween(motionMillis()))+androidx.compose.animation.fadeIn(tween(motionMillis())), exit=androidx.compose.animation.shrinkVertically(tween(motionMillis()))+androidx.compose.animation.fadeOut(tween(motionMillis()))) {
+            Column(verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                Text("晚睡扣减 ${bedPenalty.ifBlank { "0" }} 分钟 · 晚起扣减 ${wakePenalty.ifBlank { "0" }} 分钟",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
+                Text("已使用的奖励额度不追回",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
+                Text("没有记录的日期不处罚",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
+            }
+        }
+        Text("Health Connect · 可选导入",style=MaterialTheme.typography.labelLarge)
+        Text("读取已有时段 · 保存前需核对确认",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
+        PrimaryAction(if(readingHealth)"正在读取" else "读取睡眠记录",{
+            if(HealthConnectClient.getSdkStatus(context)!=HealthConnectClient.SDK_AVAILABLE) healthMessage="Health Connect 当前不可用或需要更新"
             else scope.launch {
                 runCatching { HealthConnectClient.getOrCreate(context).permissionController.getGrantedPermissions() }
                     .onSuccess { granted -> if(sleepReadPermission in granted) loadHealthSessions() else sleepPermissionLauncher.launch(setOf(sleepReadPermission)) }
@@ -97,7 +108,7 @@ internal fun SleepCard(db:Database,refreshKey:Int,onChanged:()->Unit) {
             TextButton(onClick={
                 importedSession=session
                 selectedDate=session.date
-                healthMessage="已填入 ${healthSleepSourceLabel(context,session.sourcePackage)} 的记录。请核对时间，确认后才会保存并参与睡眠规则。"
+                healthMessage="已填入 ${healthSleepSourceLabel(context,session.sourcePackage)} 记录 · 核对时间后保存"
             },modifier=Modifier.fillMaxWidth()) {
                 Column(Modifier.fillMaxWidth()) {
                     Text("${session.date} · ${session.bedtime}–${session.wakeTime}",color=AppColors.Text)
@@ -110,7 +121,7 @@ internal fun SleepCard(db:Database,refreshKey:Int,onChanged:()->Unit) {
             TextButton(onClick={choosingDate=true}){Text(selectedDate)}
             if(selectedDate!=db.day())Text("可补录或修正过去日期",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
         }
-        Text("没有记录的日期不会自动判定为违规。",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
+        Text("没有记录的日期不处罚",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
         if(db.pendingSleepPenalty()>0) Text("待后续奖励抵扣 ${db.pendingSleepPenalty()/60000} 分钟",style=MaterialTheme.typography.labelMedium,color=AppColors.Accent)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             TimeField("就寝目标",bedTarget,{bedTarget=it},Modifier.weight(1f))
@@ -122,7 +133,7 @@ internal fun SleepCard(db:Database,refreshKey:Int,onChanged:()->Unit) {
         }
         TextButton(onClick={
             val result=runCatching{db.saveSleepTargets(bedTarget,wakeTarget,bedPenalty.toInt(),wakePenalty.toInt())}
-            message=if(result.isSuccess)"睡眠目标已保存。" else "请检查时间格式（HH:mm）和扣减分钟数。"
+            message=if(result.isSuccess)"睡眠目标已保存" else "请检查时间格式和扣减分钟数"
             if(result.isSuccess)onChanged()
         }){Text("保存睡眠目标")}
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -138,7 +149,7 @@ internal fun SleepCard(db:Database,refreshKey:Int,onChanged:()->Unit) {
             val result=runCatching{db.recordSleep(selectedDate,bedtime,wakeTime,exception,reason.trim(),sleepSource)}
             message=if(result.isSuccess) {
                 "${if(exception)"例外已保存" else "记录已保存"} · 待后续奖励抵扣 ${db.pendingSleepPenalty()/60000} 分钟"
-            } else "请检查时间格式；修改记录或设置例外时需要填写原因。"
+            } else "请检查时间格式；修正或设为例外时需填写原因"
             if(result.isSuccess)onChanged()
         },Modifier.fillMaxWidth())
         saved?.let { Text(if(it.excepted)"$selectedDate 例外：${it.reason}" else "$selectedDate 已记录 · ${it.bedtime} 就寝 / ${it.wakeTime} 起床 · 来源：${if(it.source.startsWith("health_connect:"))healthSleepSourceLabel(context,it.source.removePrefix("health_connect:").removeSuffix(":edited")) else "手动记录"}",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted) }

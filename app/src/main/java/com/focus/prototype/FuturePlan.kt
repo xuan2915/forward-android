@@ -19,5 +19,5 @@ import java.time.LocalDate
    Button(enabled=!c.confirmed && db.tasks(date).any{it.required},onClick={db.confirm(date,false,minutes.toIntOrNull()?:0,games.toIntOrNull()?:0);onChanged()}){Text("确认这一天的任务")}
   }
  }
- if(restConfirm)AlertDialog(onDismissRequest={restConfirm=false},title={Text("把 $date 设为休息日？")},text={Text("这一天的必做任务将改为选做。休息日保留连续记录，不增加连续天数。")},confirmButton={TextButton(onClick={db.planRest(date,minutes.toIntOrNull()?:0,games.toIntOrNull()?:0);restConfirm=false;onChanged()}){Text("确认休息日")}},dismissButton={TextButton(onClick={restConfirm=false}){Text("取消")}})
+ if(restConfirm)AlertDialog(onDismissRequest={restConfirm=false},title={Text("将 $date 设为休息日？")},text={Text("必做任务将改为选做 · 保留连续记录，不增加天数")},confirmButton={TextButton(onClick={db.planRest(date,minutes.toIntOrNull()?:0,games.toIntOrNull()?:0);restConfirm=false;onChanged()}){Text("设为休息日")}},dismissButton={TextButton(onClick={restConfirm=false}){Text("取消")}})
 }

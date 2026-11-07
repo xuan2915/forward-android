@@ -13,7 +13,7 @@ import androidx.compose.ui.unit.dp
  fun save(){db.revise(task,title,required,minutes.toIntOrNull()?:0,mode,checklist,video.toIntOrNull()?:0,games.toIntOrNull()?:0,rule,reason,deleting,applyFuture);open=false;confirming=false;onChanged()}
  TextButton(onClick={open=!open}) {Text(if(frozen) "变更本次计划" else "编辑任务全部要求")}
  if(open) Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
-  Text("默认仅修改本次任务。勾选后同步更新未确认的未来任务，已完成记录保留。")
+  Text("默认修改本次任务 · 可同步更新未确认的未来任务 · 已完成记录保留")
   Row { Checkbox(applyFuture,onCheckedChange={applyFuture=it});Text("同时修改未来周期任务") }
   OutlinedTextField(title,onValueChange={title=it},label={Text("名称")})
   Row { Checkbox(required,onCheckedChange={required=it}); Text("必做任务") }
@@ -25,16 +25,17 @@ import androidx.compose.ui.unit.dp
   Row { TextButton(onClick={rule="days:$days"}){Text("指定星期")}; TextButton(onClick={rule="interval:${intervalDays.toIntOrNull()?.coerceIn(1,365)?:3}"}){Text(if(rule.startsWith("interval:"))"✓ 自定义间隔" else "自定义间隔")} }
   if(rule.startsWith("days:"))OutlinedTextField(days,onValueChange={days=it.filter{c->c in '1'..'7'||c==','};rule="days:$days"},label={Text("星期：1 到 7，逗号分隔")})
   if(rule.startsWith("interval:"))OutlinedTextField(intervalDays,onValueChange={intervalDays=it.filter(Char::isDigit).take(3);rule="interval:${intervalDays.toIntOrNull()?.coerceIn(1,365)?:1}"},label={Text("每隔几天（1–365）")},singleLine=true)
-  Text("重复规则：$rule")
+  val recurrenceLabel=when { rule=="once"->"仅此一次";rule=="daily"->"每天";rule=="weekly"->"每周同日";rule.startsWith("days:")->"指定星期 $days";rule.startsWith("interval:")->"每隔 ${intervalDays} 天";else->"仅此一次" }
+  Text("重复 · $recurrenceLabel")
   if(frozen) OutlinedTextField(reason,onValueChange={reason=it},label={Text("变更原因（会保留原要求与时间）")})
   Row { Checkbox(deleting,onCheckedChange={deleting=it});Text("删除本次任务") }
-  if(frozen && task.required && (deleting || !required))Text("已完成任务的奖励保留；删除或延期未完成任务不会发奖。")
+  if(frozen && task.required && (deleting || !required))Text("已完成任务的奖励保留 · 未完成任务变更后不发奖")
   Button(enabled=title.isNotBlank() && (!rule.startsWith("interval:") || (intervalDays.toIntOrNull()?:0) in 1..365) && (!frozen || reason.isNotBlank()),onClick={if(frozen)confirming=true else save()}) {Text(if(frozen) "确认变更并记录" else "保存修改")}
  }
- if(confirming)AlertDialog(onDismissRequest={confirming=false},title={Text("确认修改今天的计划？")},text={Text("原要求、新要求和原因都会保留。${if(applyFuture) "未确认的未来周期任务也将更新。" else "只修改本次任务。"}")},confirmButton={TextButton(onClick={save()}){Text("确认修改")}},dismissButton={TextButton(onClick={confirming=false}){Text("返回检查")}})
+ if(confirming)AlertDialog(onDismissRequest={confirming=false},title={Text("确认修改今天的计划？")},text={Text("原要求、新要求和原因都会保留 · ${if(applyFuture) "同步更新未确认的未来周期任务" else "仅修改本次任务"}")},confirmButton={TextButton(onClick={save()}){Text("确认修改")}},dismissButton={TextButton(onClick={confirming=false}){Text("返回检查")}})
 }
 
 @Composable fun DaySettings(db:Database,onChanged:()->Unit) {
  var hour by remember { mutableStateOf(db.setting("boundary","4")) }
- Column { Text("任务每天 0 点更新；娱乐额度默认凌晨 4 点重置。"); OutlinedTextField(hour,onValueChange={hour=it.filter(Char::isDigit).take(2)},label={Text("额度重置时间（0–23 点）")}); Button(enabled=(hour.toIntOrNull()?:-1) in 0..23,onClick={db.scheduleBoundary(hour.toInt());onChanged()}){Text("设置额度重置时间")}; val pending=db.setting("boundary_effective"); if(pending.isNotBlank()) Text("生效时间：$pending；历史任务与奖励不会重新结算。") }
+ Column { Text("任务 00:00 更新 · 奖励额度默认 04:00 重置"); OutlinedTextField(hour,onValueChange={hour=it.filter(Char::isDigit).take(2)},label={Text("额度重置时间（0–23 点）")}); Button(enabled=(hour.toIntOrNull()?:-1) in 0..23,onClick={db.scheduleBoundary(hour.toInt());onChanged()}){Text("设置额度重置时间")}; val pending=db.setting("boundary_effective"); if(pending.isNotBlank()) Text("生效时间：$pending · 历史任务与奖励不重新结算") }
 }

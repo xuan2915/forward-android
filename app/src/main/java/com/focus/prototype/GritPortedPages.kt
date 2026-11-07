@@ -194,7 +194,7 @@ internal fun GritTaskListPage(
                 if (filteredTasks.isEmpty()) {
                     item {
                         Text(
-                            if (tasks.isEmpty()) "今天还没有任务，添加一项要完成的事。" else "这个分类下还没有任务。",
+                            if (tasks.isEmpty()) "今天还没有任务，添加一项要完成的事" else "这个分类下还没有任务",
                             modifier = Modifier.fillMaxWidth().padding(top = 150.dp, start = 12.dp, end = 12.dp),
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -347,7 +347,7 @@ internal fun GritHabitAnalyticsPage(db: Database, taskId: String, refreshKey: In
     if (data == null) {
         Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             TextButton(onClick = onBack) { Text("返回成长") }
-            Text("这项任务已不在历史记录中。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("这项任务已不在历史记录中", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }

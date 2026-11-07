@@ -68,7 +68,7 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
     Column(Modifier.fillMaxWidth().animateContentSize(motionSizeSpec()).padding(top = AppSpace.Medium, bottom = AppSpace.Large), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             PageHeading("专注 · 今日任务", "专注时间")
-            StatusPill(if (phase == "work") "正在专注" else if (phase == "break") "正在休息" else "本地计时", active = running)
+            StatusPill(when (phase) { "work" -> "专注中"; "break" -> "休息中"; "paused" -> "已暂停"; else -> "准备专注" }, active = running)
         }
         Spacer(Modifier.height(AppSpace.Medium))
 
@@ -99,16 +99,16 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
             freeMode,
             phase == "break" || phase == "paused" && pausedFrom == "break",
             time,
-            if (phase == "break" || phase == "paused" && pausedFrom == "break") "休息" else if (phase == "work" || activeTask) "专注" else "准备开始",
+            when { phase == "break" || phase == "paused" && pausedFrom == "break" -> "休息中"; phase == "paused" -> "已暂停"; phase == "work" -> "专注中"; else -> "准备专注" },
         )
         Spacer(Modifier.height(12.dp))
         Text(
             when {
-                phase == "work" -> "保持节奏。"
-                phase == "break" -> "休息一下，回来继续。"
-                phase == "paused" -> "从这里接着做。"
+                phase == "work" -> "专注中"
+                phase == "break" -> "休息一下"
+                phase == "paused" -> "已暂停"
                 timer.notice.isNotBlank() -> timer.notice
-                else -> "先做这一件事。"
+                else -> "准备专注"
             },
             style = MaterialTheme.typography.titleMedium,
             color = AppColors.Text,
@@ -146,21 +146,21 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
 
         Spacer(Modifier.height(12.dp))
         val morph by animateFloatAsState(if(running) 1f else 0f,tween(motionMillis()),label="play-pause")
-        PrimaryAction(when(phase){"work"->"暂停";"break"->"暂停休息";"paused"->"继续";else->"开始专注"}, {
+        PrimaryAction(when(phase){"work"->"暂停专注";"break"->"暂停休息";"paused"->if(pausedFrom=="break")"继续休息" else "继续专注";else->"开始专注"}, {
             when(phase){"work","break"->timer.pause();"paused"->if(pausedFrom=="break")timer.resumeBreak() else selected?.let(timer::resume);else->selected?.let(timer::begin)}
             onChanged()
         },Modifier.fillMaxWidth(),selected!=null || phase=="break" || pausedFrom=="break",icon={PlayPauseMorph(morph)})
         AnimatedVisibility(phase!="ready",enter=expandVertically(tween(motionMillis()))+fadeIn(),exit=shrinkVertically(tween(motionMillis()))+fadeOut()) {
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                 if(phase=="work") SecondaryAction("休息一下",{timer.takeBreak();onChanged()},Modifier.weight(1f))
-                SecondaryAction(if(phase=="break") "结束休息" else "结束本次",{timer.finish();onChanged()},Modifier.weight(1f))
+                SecondaryAction(if(phase=="break") "结束休息" else "结束本轮",{timer.finish();onChanged()},Modifier.weight(1f))
             }
         }
         Spacer(Modifier.height(10.dp))
         Text(
             when {
-                phase == "break" -> "休息时间不会计入任务专注时长"
-                activeTask && selected != null -> "专注时长已累计至「${selected.title}」"
+                phase == "break" -> "休息时间不计入任务专注时长"
+                activeTask && selected != null -> "专注时间会计入「${selected.title}」"
                 selected == null -> "先在今日任务中安排一项必做任务"
                 else -> "完成后，专注时间会记录到这项任务"
             },
