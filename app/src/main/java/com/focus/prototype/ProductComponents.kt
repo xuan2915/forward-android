@@ -1,3 +1,21 @@
+/*
+ * Copyright (C) 2026 Shubham Gorai
+ * This file includes UI derived from Grit shared/ui's habit statistics.
+ * The Self Discipline-specific data binding and layout adjustments are modifications.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 package com.focus.prototype
 
 import androidx.compose.animation.core.animateFloatAsState
@@ -8,6 +26,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
+import java.time.LocalDate
+import java.util.Locale
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,7 +43,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlin.math.ceil
 
@@ -54,18 +73,21 @@ import kotlin.math.ceil
 }
 
 // StartStats composition adapted from Grit habit/ui/component/stats/StartStats.kt.
-@Composable fun GrowthHero(db:Database) {
+private data class GrowthSnapshot(val started: String?, val total: Int, val done: Int, val bestStreak: Int, val currentStreak: Int)
+
+@Composable fun GrowthHero(db:Database, refreshKey:Int=0) {
  val motion=LocalGrowthMotion.current
  val xp=motion.xp.toInt().coerceAtLeast(0)
  val level=xp/500+1
  val levelProgress=(motion.xp%500)/500f
  val rank=listOf("启程","萌芽","探索","积累","进阶","坚韧","精进","卓越")[(level-1).coerceAtMost(7)]
- val started=db.readableDatabase.rawQuery("SELECT MIN(day) FROM tasks",null).use { if(it.moveToFirst()) it.getString(0) else null }
- val levelProgressAnimated by animateFloatAsState(levelProgress.coerceIn(0f,1f),tween(motionMillis(AppMotion.Growth),easing=AppMotion.Ease),label="level-progress")
  val today=LocalDate.parse(db.day())
- val recent=db.readableDatabase.rawQuery("SELECT COUNT(*),COALESCE(SUM(done),0) FROM tasks WHERE day>=? AND day<=?",arrayOf(today.minusDays(29).toString(),today.toString())).use { cursor -> cursor.moveToFirst(); cursor.getInt(0) to cursor.getInt(1) }
- val consistency=if(recent.first==0) 0f else recent.second.toFloat()/recent.first
- val consistencyAnimated by animateFloatAsState(consistency.coerceIn(0f,1f),tween(motionMillis(AppMotion.Growth),easing=AppMotion.Ease),label="consistency-progress")
+ val snapshot=remember(db,refreshKey,today) {
+  val started=db.readableDatabase.rawQuery("SELECT MIN(day) FROM tasks WHERE id NOT IN (SELECT source_id FROM task_moves)",null).use { if(it.moveToFirst()) it.getString(0) else null }
+  val counts=db.readableDatabase.rawQuery("SELECT COUNT(*),COALESCE(SUM(done),0) FROM tasks WHERE day>=? AND day<=? AND id NOT IN (SELECT source_id FROM task_moves)",arrayOf(today.minusDays(29).toString(),today.toString())).use { cursor -> cursor.moveToFirst(); cursor.getInt(0) to cursor.getInt(1) }
+  GrowthSnapshot(started,counts.first,counts.second,db.bestStreak(),db.streak())
+ }
+ val levelProgressAnimated by animateFloatAsState(levelProgress.coerceIn(0f,1f),tween(motionMillis(AppMotion.Growth),easing=AppMotion.Ease),label="level-progress")
  Column(verticalArrangement=Arrangement.spacedBy(14.dp)) {
   Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
    Column(verticalArrangement=Arrangement.spacedBy(3.dp)) {
@@ -86,40 +108,30 @@ import kotlin.math.ceil
    Text("还差 ${ceil((500-levelProgressAnimated*500).coerceAtLeast(0f)).toInt()} XP 升级",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
   }
   GrowthFeedback()
-  Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(18.dp)) {
-   ConsistencyRing(recent.first,recent.second,consistencyAnimated)
-   Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)) {
-    GrowthStatRow("开始记录",started?.let { LocalDate.parse(it).format(DateTimeFormatter.ofPattern("M月d日")) } ?: "今天",R.drawable.grit_flag)
-    Hairline()
-    GrowthStatRow("最长连续","${db.bestStreak()} 天",R.drawable.grit_heat)
-    Hairline()
-    GrowthStatRow("当前连续","${db.streak()} 天",R.drawable.grit_chart)
+  GritGrowthStats(snapshot)
+ }
+}
+
+@Composable private fun GritGrowthStats(data:GrowthSnapshot) {
+ val target=if(data.total==0) 0f else (data.done.toFloat()/data.total).coerceIn(0f,1f)
+ val progress by animateFloatAsState(target,tween(motionMillis(AppMotion.Growth),easing=AppMotion.Ease),label="grit-overall-consistency")
+ Row(Modifier.fillMaxWidth().widthIn(max=380.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+  Box(contentAlignment=Alignment.Center) {
+   CircularProgressIndicator(progress={progress},strokeCap=StrokeCap.Round,strokeWidth=36.dp,modifier=Modifier.size(200.dp),trackColor=MaterialTheme.colorScheme.surfaceContainerHighest)
+   Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(1.dp)) {
+    if(data.total==0) Text("—",style=MaterialTheme.typography.headlineSmall.copy(fontFamily=gritFontRounded(),color=MaterialTheme.colorScheme.primary))
+    else Row(verticalAlignment=Alignment.CenterVertically) {
+     Text("${(progress*100).toInt()}%",style=MaterialTheme.typography.headlineSmall.copy(fontFamily=gritFontRounded(),color=MaterialTheme.colorScheme.primary))
+    }
+    Text(if(data.total==0) "暂无记录" else "近30天完成率",style=MaterialTheme.typography.titleSmall.copy(fontFamily=gritFontRounded()))
+    if(data.total>0) Text("${data.done} / ${data.total} 项",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
    }
   }
- }
-}
-
-@Composable private fun ConsistencyRing(total:Int,done:Int,progress:Float) {
- val trackColor=MaterialTheme.colorScheme.surfaceContainerHighest
- val progressColor=MaterialTheme.colorScheme.primary
- Box(Modifier.size(158.dp),contentAlignment=Alignment.Center) {
-  Canvas(Modifier.fillMaxSize().padding(6.dp)) {
-   val ring=Stroke(18.dp.toPx(),cap=StrokeCap.Round)
-   drawArc(trackColor,-90f,360f,false,style=ring)
-   if(total>0) drawArc(progressColor,-90f,360f*progress,false,style=ring)
+  Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+    GritStatTile("开始记录",data.started?.let { LocalDate.parse(it).format(DateTimeFormatter.ofPattern("yyyy/M/d",Locale.CHINA)) } ?: "尚未开始",R.drawable.grit_flag,MaterialTheme.colorScheme.primaryContainer)
+   GritStatTile("最长连续",data.bestStreak.toString(),R.drawable.grit_heat,MaterialTheme.colorScheme.primaryContainer)
+   val streakFraction by animateFloatAsState(if(data.bestStreak==0) 0f else (data.currentStreak.toFloat()/data.bestStreak).coerceIn(0f,1f),tween(motionMillis(AppMotion.Growth)),label="grit-current-streak")
+   GritStatTile("当前连续",data.currentStreak.toString(),R.drawable.grit_sprint,MaterialTheme.colorScheme.primaryContainer,streakFraction)
   }
-  Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(1.dp)) {
-   Text(if(total==0) "—" else "${(progress*100).toInt()}%",style=MaterialTheme.typography.headlineMedium.copy(fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.primary))
-   Text(if(total==0) "近30天" else "完成率",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
-   if(total>0) Text("$done / $total 项",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-  }
- }
 }
-
-@Composable private fun GrowthStatRow(label:String,value:String,icon:Int) {
- Row(Modifier.fillMaxWidth().heightIn(min=36.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(9.dp)) {
-  Icon(androidx.compose.ui.res.painterResource(icon),null,tint=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.size(17.dp))
-  Text(label,Modifier.weight(1f),style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1)
-  Text(value,style=MaterialTheme.typography.titleSmall.copy(fontWeight=FontWeight.SemiBold),color=MaterialTheme.colorScheme.onSurface,maxLines=1)
- }
 }

@@ -281,25 +281,49 @@ private fun GritTaskListCard(
                     }
                 }
             }
-            .animateContentSize(),
+            .animateContentSize(motionSizeSpec()),
         colors = CardDefaults.cardColors(containerColor = cardBackground, contentColor = cardContent),
         shape = shape,
     ) {
-        // Grit TaskCard's list row is intentionally title-only; category and
-        // focus details stay in the existing detail sheet. The trailing menu
-        // button is the accessible alternative to the card's long press.
+        // Grit TaskCard row adapted to dated self-discipline tasks. Completion
+        // remains a detail-sheet action so evidence and frozen-plan rules stay
+        // in force; the row keeps Grit's status, title, supporting line, and
+        // trailing action hierarchy.
         Row(
             Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                task.title,
-                modifier = Modifier.weight(1f).padding(vertical = 16.dp),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
-                textDecoration = if (task.done) TextDecoration.LineThrough else TextDecoration.None,
-            )
+            CompletionMark(task.done)
+            Column(
+                Modifier.weight(1f).padding(vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    task.title,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                    textDecoration = if (task.done) TextDecoration.LineThrough else TextDecoration.None,
+                )
+                val target = if (task.minutes > 0) "${task.minutes} 分钟" else "自由专注"
+                val reward = buildList {
+                    if (task.rewardMinutes > 0) add("+${task.rewardMinutes} 分钟")
+                    if (task.rewardGames > 0) add("+${task.rewardGames} 局")
+                }.joinToString(" · ")
+                Text(
+                    buildString {
+                        append(if (task.required) "必做" else "选做")
+                        append(" · ")
+                        append(target)
+                        if (reward.isNotEmpty()) append(" · 完成可得 $reward")
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Box {
                 IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(40.dp).semantics { contentDescription = "任务操作" }) {
                     Text("⋮", fontSize = 24.sp, color = cardContent, maxLines = 1)
@@ -425,9 +449,9 @@ internal fun GritHabitAnalyticsPage(db: Database, taskId: String, refreshKey: In
 
 @Composable
 private fun GritStartStats(data: GritHabitData) {
-    val progress by animateFloatAsState(data.consistency, animationSpec = tween(900), label = "grit-consistency")
+    val progress by animateFloatAsState(data.consistency, animationSpec = tween(motionMillis(AppMotion.Growth), easing = AppMotion.Ease), label = "grit-consistency")
     Row(
-        modifier = Modifier.fillMaxWidth().widthIn(max = 300.dp),
+        modifier = Modifier.fillMaxWidth().widthIn(max = 380.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -439,7 +463,7 @@ private fun GritStartStats(data: GritHabitData) {
                 modifier = Modifier.size(200.dp),
             )
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("${(data.consistency * 100).roundToInt()}%", style = MaterialTheme.typography.headlineSmall.copy(fontFamily = gritFontRounded(), color = MaterialTheme.colorScheme.primary))
+                Text("${(progress * 100).roundToInt()}%", style = MaterialTheme.typography.headlineSmall.copy(fontFamily = gritFontRounded(), color = MaterialTheme.colorScheme.primary))
                 Text("完成率", style = MaterialTheme.typography.titleSmall.copy(fontFamily = gritFontRounded()))
             }
         }
@@ -457,7 +481,7 @@ private fun GritStartStats(data: GritHabitData) {
 }
 
 @Composable
-private fun GritStatTile(label: String, value: String, icon: Int, color: Color, fraction: Float = 1f) {
+internal fun GritStatTile(label: String, value: String, icon: Int, color: Color, fraction: Float = 1f) {
     Row(
         Modifier.fillMaxWidth().background(color, RoundedCornerShape(20.dp)),
         verticalAlignment = Alignment.CenterVertically,

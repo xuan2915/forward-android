@@ -22,7 +22,7 @@ val LocalReducedMotion = staticCompositionLocalOf { false }
 val LocalGrowthMotion = staticCompositionLocalOf { GrowthMotion(0f, "") }
 data class GrowthMotion(val xp:Float, val feedback:String)
 @Composable fun motionMillis(duration:Int = AppMotion.Standard) = if(LocalReducedMotion.current) 0 else duration
-@Composable fun MotionHost(xp:Int, showToast:Boolean = true, content:@Composable ()->Unit) {
+@Composable fun MotionHost(xp:Int, showToast:Boolean = true, achievementCount:Int = 0, content:@Composable ()->Unit) {
  val context=LocalContext.current
  var reduced by remember { mutableStateOf(!android.animation.ValueAnimator.areAnimatorsEnabled()) }
  DisposableEffect(context) {
@@ -30,10 +30,13 @@ data class GrowthMotion(val xp:Float, val feedback:String)
   context.contentResolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),false,observer)
   onDispose { context.contentResolver.unregisterContentObserver(observer) }
  }
- val value=remember { Animatable(xp.toFloat()) }; var previous by remember { mutableIntStateOf(xp) }; var feedback by remember { mutableStateOf("") }
- LaunchedEffect(xp,reduced) {
+ val value=remember { Animatable(xp.toFloat()) }; var previous by remember { mutableIntStateOf(xp) }; var previousAchievements by remember { mutableIntStateOf(achievementCount) }; var feedback by remember { mutableStateOf("") }
+ LaunchedEffect(xp,achievementCount,reduced) {
   val old=previous;previous=xp
+  val newlyEarned=achievementCount>previousAchievements
+  previousAchievements=achievementCount
   if(xp!=old) feedback=if(xp>old) { if(xp/500>old/500) "已升级 · 等级 ${xp/500+1}" else "+${xp-old} XP · 已记录" } else "完成状态已更新"
+  else if(newlyEarned) feedback="新成就已解锁 · 已获得 ${achievementCount} 项"
   if(reduced) value.snapTo(xp.toFloat()) else value.animateTo(xp.toFloat(),tween(AppMotion.Growth,easing=AppMotion.Ease))
   if(feedback.isNotEmpty()) { kotlinx.coroutines.delay(2200);feedback="" }
  }

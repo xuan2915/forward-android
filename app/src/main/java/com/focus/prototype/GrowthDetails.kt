@@ -3,6 +3,8 @@ package com.focus.prototype
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -90,9 +92,14 @@ fun GrowthDetails(db: Database,refreshKey:Int=0,onAllAchievements:()->Unit={}) {
     }
 
     val transitionDuration = motionMillis(AppMotion.Short)
+    val sectionExitDuration = motionMillis(AppMotion.Short)
     AnimatedContent(
         targetState = section,
-        transitionSpec = { fadeIn(tween(transitionDuration)) togetherWith fadeOut(tween(transitionDuration)) },
+        transitionSpec = {
+            val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
+            (fadeIn(tween(transitionDuration)) + slideInHorizontally(tween(transitionDuration)) { it / 18 * direction }) togetherWith
+                (fadeOut(tween(sectionExitDuration)) + slideOutHorizontally(tween(sectionExitDuration)) { -it / 22 * direction })
+        },
         label = "growth-section",
     ) { visibleSection ->
         when (visibleSection) {
@@ -162,23 +169,37 @@ private fun CalendarSection(
         )
     }
 
-    val selectedState = history[selectedDate.toString()]
-    GritAnalyticsHeader("${selectedDate.monthValue}月${selectedDate.dayOfMonth}日", icon = R.drawable.grit_analytics) {
-        StatusPill(selectedState ?: "未记录", active = selectedState == "完成")
-    }
-    QuietSurface {
-        val selectedTasks = if (selectedState != null) db.tasks(selectedDate.toString()) else emptyList()
-        if (selectedTasks.isEmpty()) Text("这一天还没有任务记录。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-        selectedTasks.forEachIndexed { index, task ->
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                CompletionMark(task.done)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(task.title, style = MaterialTheme.typography.bodyMedium, color = AppColors.Text, maxLines = 1)
-                    Text(if (task.minutes > 0) "${focusDuration(db.elapsed(task))} / 目标 ${task.minutes} 分钟" else "专注 ${focusDuration(db.elapsed(task))}", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
-                }
-                Text(if (task.done) "完成" else "未完成", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
+    val dayEnterDuration = motionMillis(AppMotion.Standard)
+    val dayExitDuration = motionMillis(AppMotion.Short)
+    AnimatedContent(
+        targetState = selectedDate,
+        transitionSpec = {
+            val direction = if (targetState.isAfter(initialState)) 1 else -1
+            (fadeIn(tween(dayEnterDuration)) + slideInHorizontally(tween(dayEnterDuration)) { it / 20 * direction }) togetherWith
+                (fadeOut(tween(dayExitDuration)) + slideOutHorizontally(tween(dayExitDuration)) { -it / 24 * direction })
+        },
+        label = "growth-selected-day",
+    ) { visibleDate ->
+        val selectedState = history[visibleDate.toString()]
+        Column {
+            GritAnalyticsHeader("${visibleDate.monthValue}月${visibleDate.dayOfMonth}日", icon = R.drawable.grit_analytics) {
+                StatusPill(selectedState ?: "未记录", active = selectedState == "完成")
             }
-            if (index < selectedTasks.lastIndex) Hairline()
+            QuietSurface {
+                val selectedTasks = if (selectedState != null) db.tasks(visibleDate.toString()) else emptyList()
+                if (selectedTasks.isEmpty()) Text("这一天还没有任务记录。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                selectedTasks.forEachIndexed { index, task ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CompletionMark(task.done)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(task.title, style = MaterialTheme.typography.bodyMedium, color = AppColors.Text, maxLines = 1)
+                            Text(if (task.minutes > 0) "${focusDuration(db.elapsed(task))} / 目标 ${task.minutes} 分钟" else "专注 ${focusDuration(db.elapsed(task))}", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
+                        }
+                        Text(if (task.done) "完成" else "未完成", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
+                    }
+                    if (index < selectedTasks.lastIndex) Hairline()
+                }
+            }
         }
     }
 }

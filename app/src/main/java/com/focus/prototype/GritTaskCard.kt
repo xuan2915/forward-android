@@ -18,6 +18,7 @@
 package com.focus.prototype
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -40,6 +41,11 @@ fun GritTaskHeader(
     onExpand: () -> Unit,
     onFocusToggle: () -> Unit,
 ) {
+    val playPauseProgress by animateFloatAsState(
+        targetValue = if (active) 1f else 0f,
+        animationSpec = tween(motionMillis(AppMotion.Short), easing = AppMotion.Ease),
+        label = "grit-task-play-pause",
+    )
     val cardContent by animateColorAsState(
         MaterialTheme.colorScheme.onSurface,
         tween(motionMillis()), label = "grit-content",
@@ -84,7 +90,7 @@ fun GritTaskHeader(
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(42.dp),
                 ) {
-                    Box(contentAlignment = Alignment.Center) { PlayPauseMorph(if (active) 1f else 0f, 42) }
+                    Box(contentAlignment = Alignment.Center) { PlayPauseMorph(playPauseProgress, 42) }
                 }
             }
         }
