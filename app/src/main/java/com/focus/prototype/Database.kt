@@ -324,7 +324,7 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
  fun pendingSleepPenalty():Long = readableDatabase.rawQuery("SELECT COALESCE(SUM(CAST(value AS INTEGER)),0) FROM settings WHERE key GLOB 'sleep_pending_*'",null).use{it.moveToFirst();it.getLong(0)}
  fun recordSleep(date:String,bedtime:String,wake:String,excepted:Boolean=false,reason:String="") {
   val bed=java.time.LocalTime.parse(bedtime);val woke=java.time.LocalTime.parse(wake);val old=sleepRecord(date)
-  require(date==day() && (!excepted||reason.isNotBlank()) && (old==null || old.bedtime==bedtime&&old.wakeTime==wake&&old.excepted==excepted || reason.isNotBlank()))
+  require(LocalDate.parse(date)<=LocalDate.parse(day()) && (!excepted||reason.isNotBlank()) && (old==null || old.bedtime==bedtime&&old.wakeTime==wake&&old.excepted==excepted || reason.isNotBlank()))
   val targets=sleepTargets();val bedTarget=java.time.LocalTime.parse(targets[0]);val wakeTarget=java.time.LocalTime.parse(targets[1])
   val bedLate=if(bedTarget.hour<6&&bed.hour>=18) false else bed.isAfter(bedTarget)
   val desiredBed=if(!excepted&&bedLate)targets[2].toLong()*60000 else 0L

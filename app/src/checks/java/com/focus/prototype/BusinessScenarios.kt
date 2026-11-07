@@ -107,6 +107,24 @@ fun resign(root:org.json.JSONObject,payload:org.json.JSONObject):String { val bo
      d.recordSleep(date,"23:30","08:00",reason="恢复睡眠记录");now=now.plusDays(1);d.confirm(next,false,0,0);d.tasks(next).forEach{d.complete(it)};check(d.balance("video")==300000L);check(d.pendingSleepPenalty()==0L);check(d.rewardSnapshot("video").earned==1200000L);check(d.rewardSnapshot("video").sleepDeducted==900000L);check(d.rewardHistory().any{it.contains("睡眠规则抵扣 −15 分钟")})
     } finally {d.close()}
    }
+   test("historical sleep can be added and corrected without repeating penalties") {
+    val other="historical-sleep.db";context.deleteDatabase(other);var clock=LocalDateTime.parse("2026-11-06T12:00:00");val d=Database(context,other){clock}
+    try {
+     val yesterday=java.time.LocalDate.parse(d.day()).minusDays(1).toString();val missing=java.time.LocalDate.parse(yesterday).minusDays(1).toString()
+     d.recordSleep(yesterday,"02:00","08:30");val first=d.pendingSleepPenalty();check(first==30*60000L);d.recordSleep(yesterday,"02:00","08:30");check(d.pendingSleepPenalty()==first)
+     d.recordSleep(yesterday,"00:30","07:00",reason="修正记录");check(d.pendingSleepPenalty()==0L);check(d.sleepRecord(yesterday)?.bedtime=="00:30")
+     d.recordSleep(missing,"23:30","07:30");check(d.sleepRecord(missing)!=null&&d.pendingSleepPenalty()==0L)
+     check(runCatching{d.recordSleep("2026-11-07","01:00","07:30")}.isFailure)
+    } finally {d.close()}
+   }
+   test("achievement categories and award dates come from real task history") {
+    val other="achievement-categories.db";context.deleteDatabase(other);var clock=LocalDateTime.parse("2026-11-06T12:00:00");val d=Database(context,other){clock}
+    try {
+     val date=d.day();d.addTask(date,"first real task",true,0,"行动型","",0,0,"once");d.confirm(date,false,0,0);d.complete(d.tasks().single())
+     val items=achievementList(d);val first=items.first{it.title=="第一步"};check(first.category=="任务完成"&&first.earned&&first.earnedDate==date)
+     check(items.map{it.category}.toSet()==setOf("任务完成","连续坚持","专注积累"));check(items.filter{!it.earned}.all{it.progress<it.target})
+    } finally {d.close()}
+   }
    test("completed legacy mandatory task receives one current-day task reward") {
     val other="legacy-reward.db";context.deleteDatabase(other);val d=Database(context,other){now}
      try {val date=d.day();d.addTask(date,"legacy done",true,0,"行动型","",7,0,"once");d.confirm(date,false,0,0);d.writableDatabase.execSQL("UPDATE tasks SET done=1 WHERE title='legacy done'");d.ensure();check(d.balance("video")==420000L);d.ensure();check(d.balance("video")==420000L)} finally {d.close()}

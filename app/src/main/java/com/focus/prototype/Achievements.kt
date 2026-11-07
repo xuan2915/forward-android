@@ -32,7 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import java.time.LocalDate
 
-internal data class Achievement(val title:String,val condition:String,val progress:Int,val target:Int,val earnedDate:String?) {
+internal data class Achievement(val category:String,val title:String,val condition:String,val progress:Int,val target:Int,val earnedDate:String?) {
     val earned get()=progress>=target
 }
 
@@ -57,14 +57,14 @@ internal fun achievementList(db:Database):List<Achievement> {
     }
     val streak=db.bestStreak()
     return listOf(
-        Achievement("第一步","完成第一项任务",completedDates.size.coerceAtMost(1),1,taskDate(1)),
-        Achievement("十项完成","累计完成 10 项任务",completedDates.size.coerceAtMost(10),10,taskDate(10)),
-        Achievement("五十项完成","累计完成 50 项任务",completedDates.size.coerceAtMost(50),50,taskDate(50)),
-        Achievement("连做三天","连续三个自律日完成目标",streak.coerceAtMost(3),3,streakDate(3)),
-        Achievement("稳定一周","连续七个自律日完成目标",streak.coerceAtMost(7),7,streakDate(7)),
-        Achievement("坚持一月","连续三十个自律日完成目标",streak.coerceAtMost(30),30,streakDate(30)),
-        Achievement("专注一小时","累计有效专注 60 分钟",focusMinutes.toInt().coerceAtMost(60),60,focusDate(60)),
-        Achievement("专注十小时","累计有效专注 10 小时",focusMinutes.toInt().coerceAtMost(600),600,focusDate(600)),
+        Achievement("任务完成","第一步","完成第一项任务",completedDates.size.coerceAtMost(1),1,taskDate(1)),
+        Achievement("任务完成","十项完成","累计完成 10 项任务",completedDates.size.coerceAtMost(10),10,taskDate(10)),
+        Achievement("任务完成","五十项完成","累计完成 50 项任务",completedDates.size.coerceAtMost(50),50,taskDate(50)),
+        Achievement("连续坚持","连做三天","连续三个自律日完成目标",streak.coerceAtMost(3),3,streakDate(3)),
+        Achievement("连续坚持","稳定一周","连续七个自律日完成目标",streak.coerceAtMost(7),7,streakDate(7)),
+        Achievement("连续坚持","坚持一月","连续三十个自律日完成目标",streak.coerceAtMost(30),30,streakDate(30)),
+        Achievement("专注积累","专注一小时","累计有效专注 60 分钟",focusMinutes.toInt().coerceAtMost(60),60,focusDate(60)),
+        Achievement("专注积累","专注十小时","累计有效专注 10 小时",focusMinutes.toInt().coerceAtMost(600),600,focusDate(600)),
     )
 }
 
@@ -72,9 +72,12 @@ internal fun achievementList(db:Database):List<Achievement> {
 internal fun AchievementPreview(db:Database,refreshKey:Int,onAll:()->Unit) {
     val items=remember(refreshKey){achievementList(db)}
     val visible=items.filter{it.earned||it.progress>0}.sortedWith(compareBy<Achievement>{if(it.earned)0 else 1}.thenBy{it.target-it.progress}).take(3).ifEmpty{items.take(3)}
-    GritAnalyticsHeader("成长成就",icon=R.drawable.grit_flag){TextButton(onClick=onAll){Text("查看全部成就")}}
+    GritAnalyticsHeader("成长成就",icon=R.drawable.grit_flag)
     QuietSurface {
-        Text("已获得 ${items.count{it.earned}} / ${items.size}",style=MaterialTheme.typography.labelMedium,color=AppColors.Muted)
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+            Text("已获得 ${items.count{it.earned}} / ${items.size}",style=MaterialTheme.typography.labelMedium,color=AppColors.Muted,modifier=Modifier.weight(1f))
+            TextButton(onClick=onAll){Text("查看全部成就")}
+        }
         visible.forEach{AchievementCard(it)}
     }
 }
@@ -86,12 +89,20 @@ internal fun AchievementsPage(db:Database,refreshKey:Int,onBack:()->Unit) {
         TextButton(onClick=onBack){Text("‹ 返回成长")}
         PageHeading("真实记录 · 持续积累","全部成就")
         Text("已获得 ${items.count{it.earned}} 项 · 共 ${items.size} 项",style=MaterialTheme.typography.bodyMedium,color=AppColors.Muted)
-        GritAnalyticsHeader("已获得",icon=R.drawable.grit_flag)
-        val earned=items.filter{it.earned}
-        if(earned.isEmpty()) Text("完成任务、保持连续记录或积累专注时间后，成就会显示在这里。",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
-        earned.forEach{AchievementCard(it)}
-        GritAnalyticsHeader("继续努力",icon=R.drawable.grit_chart)
-        items.filterNot{it.earned}.forEach{AchievementCard(it)}
+        listOf("任务完成","连续坚持","专注积累").forEach { category ->
+            val group=items.filter{it.category==category}
+            GritAnalyticsHeader(category,icon=if(category=="连续坚持")R.drawable.grit_flag else R.drawable.grit_chart)
+            val earned=group.filter{it.earned}
+            if(earned.isNotEmpty()) {
+                Text("已获得",style=MaterialTheme.typography.labelMedium,color=AppColors.Muted)
+                earned.forEach{AchievementCard(it)}
+            }
+            val locked=group.filterNot{it.earned}
+            if(locked.isNotEmpty()) {
+                Text("待解锁",style=MaterialTheme.typography.labelMedium,color=AppColors.Muted)
+                locked.forEach{AchievementCard(it)}
+            }
+        }
     }
 }
 
