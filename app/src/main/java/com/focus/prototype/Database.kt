@@ -12,7 +12,7 @@ import java.util.UUID
 
 data class Task(val id: String, val date: String, val title: String, val required: Boolean, val minutes: Int, val mode: String, val checklist: String, val rewardMinutes: Int, val rewardGames: Int, val elapsed: Long, val runningSince: Long, val bootTime: Long, val evidence: String, val done: Boolean, val claimed: Boolean)
 data class Contract(val date: String, val confirmed: Boolean, val rest: Boolean, val baseMinutes: Int, val baseGames: Int, val baseClaimed: Boolean, val emergency: Boolean)
-data class SleepRecord(val date:String,val bedtime:String,val wakeTime:String,val bedtimePenalty:Long,val wakePenalty:Long,val excepted:Boolean,val reason:String)
+data class SleepRecord(val date:String,val bedtime:String,val wakeTime:String,val bedtimePenalty:Long,val wakePenalty:Long,val excepted:Boolean,val reason:String,val source:String="manual")
 data class RewardSnapshot(val earned:Long,val used:Long,val sleepDeducted:Long,val expired:Long,val reversed:Long,val remaining:Long)
 
 class Database(context: Context, name:String = "journey.db", private val now:()->LocalDateTime = { LocalDateTime.now() }) : SQLiteOpenHelper(context, name, null, 4), java.io.Closeable {
@@ -319,10 +319,10 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
  }
  fun sleepRecord(date:String=day()):SleepRecord? {
   val json=setting("sleep_record_$date");if(json.isBlank())return null
-  val o=org.json.JSONObject(json);return SleepRecord(date,o.getString("bedtime"),o.getString("wake"),o.getLong("bed_penalty"),o.getLong("wake_penalty"),o.getBoolean("excepted"),o.optString("reason"))
+  val o=org.json.JSONObject(json);return SleepRecord(date,o.getString("bedtime"),o.getString("wake"),o.getLong("bed_penalty"),o.getLong("wake_penalty"),o.getBoolean("excepted"),o.optString("reason"),o.optString("source","manual"))
  }
  fun pendingSleepPenalty():Long = readableDatabase.rawQuery("SELECT COALESCE(SUM(CAST(value AS INTEGER)),0) FROM settings WHERE key GLOB 'sleep_pending_*'",null).use{it.moveToFirst();it.getLong(0)}
- fun recordSleep(date:String,bedtime:String,wake:String,excepted:Boolean=false,reason:String="") {
+ fun recordSleep(date:String,bedtime:String,wake:String,excepted:Boolean=false,reason:String="",source:String="manual") {
   val bed=java.time.LocalTime.parse(bedtime);val woke=java.time.LocalTime.parse(wake);val old=sleepRecord(date)
   require(LocalDate.parse(date)<=LocalDate.parse(day()) && (!excepted||reason.isNotBlank()) && (old==null || old.bedtime==bedtime&&old.wakeTime==wake&&old.excepted==excepted || reason.isNotBlank()))
   val targets=sleepTargets();val bedTarget=java.time.LocalTime.parse(targets[0]);val wakeTarget=java.time.LocalTime.parse(targets[1])
@@ -345,11 +345,11 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
    val bedPenalty=reconcile("bedtime",old?.bedtimePenalty?:0,desiredBed)
    val wakePenalty=reconcile("wake",old?.wakePenalty?:0,desiredWake)
    val pending=pendingSleepPenalty()
-   val record=org.json.JSONObject().put("bedtime",bedtime).put("wake",wake).put("bed_penalty",bedPenalty).put("wake_penalty",wakePenalty).put("excepted",excepted).put("reason",reason.trim())
+   val record=org.json.JSONObject().put("bedtime",bedtime).put("wake",wake).put("bed_penalty",bedPenalty).put("wake_penalty",wakePenalty).put("excepted",excepted).put("reason",reason.trim()).put("source",source)
    setSetting("sleep_record_$date",record.toString())
    val detail=if(excepted) "睡眠例外：${reason.trim()}" else "手动睡眠记录：就寝 $bedtime，起床 $wake；待后续奖励发放扣减 ${(bedPenalty+wakePenalty)/60000} 分钟"+(if(old!=null)"；修正原因：${reason.trim()}" else "")
    if(pending>0)audit(date,"睡眠扣减待下次奖励抵扣：${pending/60000} 分钟")
-   audit(date,detail);db.setTransactionSuccessful()
+   audit(date,if(source=="manual")detail else detail.replace("手动睡眠记录","已确认的健康数据记录")+"；来源：$source");db.setTransactionSuccessful()
   } finally {db.endTransaction()}
  }
  private fun issueCompletedRequiredRewards(db:SQLiteDatabase,date:String) {
