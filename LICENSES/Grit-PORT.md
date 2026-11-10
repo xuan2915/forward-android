@@ -6,8 +6,8 @@ Upstream: [shub39/Grit](https://github.com/shub39/Grit), source snapshot `e664ff
 
 | Grit source | Self Discipline adaptation | Status |
 | --- | --- | --- |
-| `shared/ui/.../theme/GritTheme.android.kt` | `app/src/main/java/com/focus/prototype/GritTheme.kt` | Dark TONALSPOT palette with the seed color sampled from the supplied green Grit reference, plus Android system-bar adaptation. |
-| `shared/ui/.../theme/ProvideTypography.kt` | `GritTypography.kt`, `res/font/google_sans_flex.ttf`, `res/font/poppins_regular.ttf` | Original Poppins base and Google Sans Flex variable-font axes are loaded from Android resources. Font OFL files are in this folder. |
+| `shared/ui/.../theme/GritTheme.android.kt` | `app/src/main/java/com/focus/prototype/GritTheme.kt` | Grit's dark TONALSPOT structure and Android system-bar adaptation inform the theme; current warm and mineral palettes are app-owned and selectable. |
+| `shared/ui/.../theme/ProvideTypography.kt` | `GritTypography.kt`, `res/font/google_sans_flex.ttf`, `res/font/poppins_regular.ttf` | Grit's display-font resources remain available for selected emphases. The 0.10.0 general text hierarchy uses platform Sans Serif for a quieter editorial direction. Font OFL files are in this folder. |
 | `shared/ui/.../task/ui/section/TaskList.kt` | `GritPortedPages.kt` `GritTaskListPage` | Page hierarchy adapted from Grit's large task header, horizontal category selector, grouped compact list and add action. Self Discipline keeps its required/optional filters and plan action. |
 | `shared/ui/.../task/ui/component/TaskCard.kt` | `GritPortedPages.kt` `GritTaskListCard` | Compact title-only Grit task row, bold typography, completion strike-through, state colors and connected shapes. Tapping opens the existing verification/detail flow instead of bypassing it. |
 | `shared/ui/.../habit/ui/sections/AnalyticsPage.kt` | `GritPortedPages.kt` `GritHabitAnalyticsPage` | The original analytics section order is retained for a selected task: overview, weekly heat map, monthly calendar and weekly activity. |

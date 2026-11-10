@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
  override fun onResume() { super.onResume(); refresh++ }
  override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState)
   window.useDarkSystemBars()
+  val visualDirection = if (BuildConfig.DEBUG) VisualDirection.fromKey(intent.getStringExtra("visual_direction")) else VisualDirection.Warm
   receiveText(intent)
   val db = Database(this); val store = Store(this)
   val focusTimer=FocusTimer(db);focusTimer.reconcileBoot()
@@ -55,16 +56,19 @@ class MainActivity : ComponentActivity() {
   val launch = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
   val apps = packageManager.queryIntentActivities(launch,0).filter { store.canRestrict(it.activityInfo.packageName) }.distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(packageManager).toString() }
   setContent {
-    var page by remember { mutableIntStateOf(if(db.setting("import_draft").isNotBlank()) 5 else 0) }; var editor by remember { mutableStateOf(false) };var dataVersion by remember {mutableIntStateOf(0)};var rewardHistoryExpanded by remember {mutableStateOf(false)};var rewardControlsExpanded by remember {mutableStateOf(false)};var selectedRewardRecord by remember {mutableStateOf<String?>(null)};var taskFilter by remember { mutableIntStateOf(0) }
+    val debugPage = if (BuildConfig.DEBUG) intent.getIntExtra("debug_page",0) else 0
+    var page by remember { mutableIntStateOf(if(db.setting("import_draft").isNotBlank()) 5 else debugPage.coerceIn(0,5)) }; var editor by remember { mutableStateOf(false) };var dataVersion by remember {mutableIntStateOf(0)};var rewardHistoryExpanded by remember {mutableStateOf(false)};var rewardControlsExpanded by remember {mutableStateOf(false)};var selectedRewardRecord by remember { mutableStateOf<String?>(null) };var taskFilter by remember { mutableIntStateOf(0) }
     var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }; var editingTaskId by remember { mutableStateOf<String?>(null) };var movingTask by remember { mutableStateOf<Task?>(null) };var deletingTask by remember { mutableStateOf<Task?>(null) };var allAchievements by remember { mutableStateOf(false) }; var newAchievement by remember { mutableStateOf(nextUnseenAchievement(db)) }; var gritAnalyticsTaskId by remember { mutableStateOf<String?>(null) }; var showContractDialog by remember { mutableStateOf(false) }
     val taskActionScope = rememberCoroutineScope()
     fun dismissTaskActions() { movingTask=null; deletingTask=null }
    LaunchedEffect(shareVersion) { if(shareVersion>0) { page=5;editor=false } }
    LaunchedEffect(Unit) { while(true) { db.settleToday();focusTimer.advance();if(now%10L==0L)db.checkpoint();now++; delay(1000) } }
    val tick = now + refresh; val today = db.day(); val c = remember(today,tick) { db.contract(today) }; val tasks = remember(today,refresh) { db.tasks(today) }; val continuing = remember(today,refresh) { db.runningTasks().filter { it.date != today } }
+   var dailyCardRecords by remember { mutableStateOf(DailyCards.read(db)) }
+   LaunchedEffect(today,refresh) { dailyCardRecords = DailyCards.reconcileAll(db,today) }
    val protected = remember(tick) { val id = ComponentName(this,FocusService::class.java).flattenToString(); FocusService.connected && Settings.Secure.getString(contentResolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)?.split(':')?.any { it.equals(id,true) } == true }
    LaunchedEffect(refresh) { if (newAchievement == null) newAchievement = nextUnseenAchievement(db) }
-   FocusTheme { MotionHost(db.xp(),showToast=page!=2) {
+   FocusTheme(visualDirection) { MotionHost(db.xp(),showToast=page!=2) {
        androidx.activity.compose.BackHandler(enabled=allAchievements || gritAnalyticsTaskId!=null || page==5 || editor || showContractDialog) {
         when { showContractDialog -> showContractDialog=false; allAchievements -> allAchievements=false; gritAnalyticsTaskId!=null -> gritAnalyticsTaskId=null; editor -> editor=false; else -> page=0 }
        }
@@ -74,6 +78,7 @@ class MainActivity : ComponentActivity() {
       if (!editor && screen == 0) {
        GritTaskListPage(
         modifier=Modifier.fillMaxSize().padding(pad), date=today, tasks=tasks,
+        dailyCard=dailyCardRecords.firstOrNull { it.date == today },
         continuing=continuing, filter=taskFilter,
         confirmed=c.confirmed,
         onFilter={taskFilter=it}, onAdd={dismissTaskActions();targetDay=today;editor=true},
@@ -149,6 +154,7 @@ class MainActivity : ComponentActivity() {
        2 -> {
         item { GrowthHero(db,refresh) }
         item { GrowthDetails(db,refresh){allAchievements=true} }
+        if(dailyCardRecords.isNotEmpty()) item { DailyCardArchive(dailyCardRecords) }
        }
        4 -> { item { FocusScreen(db,focusTimer,tasks,onTasks={page=0},onChanged={refresh++}) } }
        5 -> {

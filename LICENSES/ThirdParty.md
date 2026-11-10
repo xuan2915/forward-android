@@ -2,10 +2,10 @@
 
 - `com.kizitonwose.calendar:compose:2.6.1` — MIT License. Used for the interactive history calendar.
 - `com.patrykandpatrick.vico:compose-m3:1.16.0` — Apache License 2.0. Used for the real seven-day completion trend chart.
-- `com.materialkolor:material-kolor:1.7.1` — MIT License. Generates Grit's default fixed-seed tonal dark palette; the included Google Material Color Utilities code is Apache-2.0. Version 1.7.1 keeps compatibility with this app's Compose/AGP toolchain.
+- `com.materialkolor:material-kolor:1.7.1` — MIT License. Retained for palette utilities compatible with this app's Compose/AGP toolchain; the current warm and mineral schemes are app-owned and no longer use Grit's seed palette. The included Google Material Color Utilities code is Apache-2.0.
 - `android/compose-samples` (Jetsnack) — studied for Compose design-system organization and component consistency; no source files or assets were copied.
 - Grit UI source is now adapted under GPL-3.0-or-later; see Grit-PORT.md and the retained file headers.
-- Grit's task-list and growth-statistics page structure, task card, streak heatmap, calendar-day treatment, theme seed and typography are directly adapted; see Grit-PORT.md for exact source-to-file mapping.
+- Grit's task-list and growth-statistics page structure, task card, streak heatmap and calendar-day treatment remain adapted; the theme colors and general typography are app-owned. See Grit-PORT.md for exact source-to-file mapping.
 
 No source code from Jetsnack is bundled. Calendar and Vico are runtime dependencies; their license texts are included beside this notice.
 
@@ -25,6 +25,8 @@ No source code from Jetsnack is bundled. Calendar and Vico are runtime dependenc
 | [Konfetti](https://github.com/DanielMartinus/Konfetti) | `2.2.0` | ISC | Not included; particle effects are intentionally not used for ordinary achievements |
 | [Game-icons](https://github.com/game-icons/icons) | Repository checked `2026-11-07` | CC BY 3.0 or CC0, per asset | Not included; each CC BY icon requires its own author attribution |
 | [Compose Phosphor Icons](https://github.com/adamglin0/compose-phosphor-icon) | README checked; published artifact `2.1.0` | MIT | Not included; achievement badges need custom medal silhouettes rather than general-purpose icons |
+| [Pomodoro Timer Android](https://github.com/Micheal-Jiaming/Pomodoro-timer-Android) | Repository reviewed `2026-11-10` | Apache-2.0 | Interaction and deadline-driven timing reference only; no source or assets copied |
+| [Tomato](https://github.com/nsh07/Tomato) | Repository reviewed `2026-11-10` | GPL-3.0 | Visual and statistics reference only; no source or assets copied |
 
 No external animation asset is loaded. The current Compose version supports the native animation APIs used here, so adding a playback or particle library would increase app size without improving this interaction.
 

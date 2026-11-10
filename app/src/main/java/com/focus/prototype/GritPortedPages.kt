@@ -111,6 +111,7 @@ internal fun GritTaskListPage(
     modifier: Modifier = Modifier,
     date: String,
     tasks: List<Task>,
+    dailyCard: DailyCardRecord?,
     continuing: List<Task>,
     filter: Int,
     confirmed: Boolean,
@@ -205,13 +206,18 @@ internal fun GritTaskListPage(
                         GritTaskListCard(task, gritTaskShape(index, filteredTasks.size), onDetails, onEdit, onMove, onDelete)
                     }
                 }
+                dailyCard?.let { record ->
+                    item(key = "daily-card-${record.date}") { DailyCardReveal(record) }
+                }
             }
-            androidx.compose.material3.FloatingActionButton(
-                onClick = onAdd,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
-                shape = MaterialTheme.shapes.large,
-            ) {
-                Icon(painterResource(R.drawable.grit_add), contentDescription = "添加任务")
+            if (dailyCard == null) {
+                androidx.compose.material3.FloatingActionButton(
+                    onClick = onAdd,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
+                    shape = MaterialTheme.shapes.large,
+                ) {
+                    Icon(painterResource(R.drawable.grit_add), contentDescription = "添加任务")
+                }
             }
         }
     }

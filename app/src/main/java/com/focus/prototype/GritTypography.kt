@@ -14,7 +14,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-// Adapted from Grit ProvideTypography.kt; Android resource loading replaces Compose Multiplatform resources.
+// Retains Grit's Material type scale while using the Android system sans face for
+// clearer Chinese fallback and a quieter native rhythm.
 package com.focus.prototype
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
@@ -25,7 +26,7 @@ import androidx.compose.ui.text.ExperimentalTextApi
 val TYPOGRAPHY = Typography()
 /** function to get custom typography for Grit */
 @Composable fun provideTypography(font: Int = R.font.poppins_regular): Typography {
-    val selectedFont = FontFamily(Font(font))
+    val selectedFont = FontFamily.SansSerif
 
     return Typography(
         displayLarge = TYPOGRAPHY.displayLarge.copy(fontFamily = selectedFont),
@@ -46,15 +47,15 @@ val TYPOGRAPHY = Typography()
     )
 }
 
-/** Original Grit variable-font settings, retained for emphasized headings and rounded metrics. */
+/** Narrower, less inflated display treatment for labels carried over from Grit pages. */
 @OptIn(ExperimentalTextApi::class)
 @Composable fun gritFontEmphasis(slant: Float = 0f): FontFamily = FontFamily(
     Font(
         R.font.google_sans_flex,
         variationSettings = FontVariation.Settings(
-            FontVariation.weight(1000),
+            FontVariation.weight(760),
             FontVariation.slant(slant),
-            FontVariation.width(120f),
+            FontVariation.width(106f),
         ),
     ),
 )
@@ -64,8 +65,8 @@ val TYPOGRAPHY = Typography()
     Font(
         R.font.google_sans_flex,
         variationSettings = FontVariation.Settings(
-            FontVariation.weight(700),
-            FontVariation.Setting("ROND", 100f),
+            FontVariation.weight(680),
+            FontVariation.Setting("ROND", 35f),
         ),
     ),
 )

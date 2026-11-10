@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
@@ -46,6 +47,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -208,11 +210,16 @@ private fun AchievementCard(item: Achievement, onClick: () -> Unit) {
 
 @Composable
 private fun AchievementMedal(item: Achievement, modifier: Modifier = Modifier, size: Dp = 66.dp) {
+    val medalMetal = when (item.category) {
+        "连续记录" -> Color(0xFFC6A46C)
+        "专注积累" -> Color(0xFF899FB7)
+        else -> Color(0xFFC18465)
+    }
     val tint by animateColorAsState(
         targetValue = when {
-            item.earned -> AppColors.Accent
-            item.started -> AppColors.Accent.copy(alpha = 0.58f)
-            else -> AppColors.Muted.copy(alpha = 0.48f)
+            item.earned -> medalMetal
+            item.started -> medalMetal.copy(alpha = 0.66f)
+            else -> AppColors.Muted.copy(alpha = 0.42f)
         },
         label = "medal-color-${item.id}",
     )
@@ -227,6 +234,14 @@ private fun AchievementMedal(item: Achievement, modifier: Modifier = Modifier, s
         val cy = h / 2f
         val min = this.size.minDimension
         val color = tint
+        val center = Offset(cx - min * .12f, cy - min * .16f)
+        val rarity = when {
+            item.target >= 30 -> 1.0f
+            item.target >= 7 -> .72f
+            else -> .48f
+        }
+        drawCircle(color.copy(alpha = if (item.earned) .12f else .045f), min * .47f, Offset(cx, cy - min * .02f))
+        drawCircle(color.copy(alpha = if (item.earned) .22f else .08f), min * .42f, Offset(cx, cy - min * .02f), style = Stroke(min * .012f))
         val ribbon = Path().apply {
             moveTo(cx - min * .24f, cy + min * .12f)
             lineTo(cx - min * .29f, cy + min * .48f)
@@ -237,11 +252,20 @@ private fun AchievementMedal(item: Achievement, modifier: Modifier = Modifier, s
             lineTo(cx + min * .24f, cy + min * .12f)
             close()
         }
-        drawPath(ribbon, color.copy(alpha = if (item.earned) .54f else .18f))
+        drawPath(ribbon, color.copy(alpha = if (item.earned) .70f else .16f))
         val body = medalBody(cx, cy - min * .035f, min * .39f, item.id.endsWith("fifty") || item.id.endsWith("thirty") || item.id.endsWith("ten_hours"))
-        drawPath(body, color.copy(alpha = if (item.earned) .24f else .09f))
-        drawPath(body, color.copy(alpha = if (item.earned) .92f else .7f), style = Stroke(width = min * .035f))
-        drawCircle(color.copy(alpha = if (item.earned) .78f else .35f), radius = min * .275f, center = Offset(cx, cy - min * .035f), style = Stroke(width = min * .018f))
+        if (item.earned) {
+            drawPath(body, Brush.radialGradient(listOf(Color.White.copy(alpha = .48f), color.copy(alpha = .44f), color.copy(alpha = .9f)), center, min * .62f))
+        } else {
+            drawPath(body, color.copy(alpha = if (item.started) .1f else .025f))
+        }
+        drawPath(body, color.copy(alpha = if (item.earned) .96f else if (item.started) .74f else .42f), style = Stroke(width = min * .035f))
+        drawCircle(color.copy(alpha = if (item.earned) .8f else if (item.started) .52f else .23f), radius = min * .275f, center = Offset(cx, cy - min * .035f), style = Stroke(width = min * .018f))
+        if (item.earned && rarity > .7f) {
+            for (side in listOf(-1f, 1f)) {
+                drawCircle(Color.White.copy(alpha = .5f), min * .018f * rarity, Offset(cx + side * min * .31f, cy - min * .18f))
+            }
+        }
         if (!item.earned && item.started) {
             drawArc(color.copy(alpha = .95f), -90f, 360f * progress, false, style = Stroke(width = min * .045f, cap = StrokeCap.Round), topLeft = Offset(cx - min * .44f, cy - min * .44f), size = androidx.compose.ui.geometry.Size(min * .88f, min * .88f))
         }
@@ -377,44 +401,68 @@ internal fun AchievementUnlockDialog(item: Achievement, onDismiss: () -> Unit, o
     val reduced = LocalReducedMotion.current
     val scale = remember(item.id) { Animatable(if (reduced) 1f else .54f) }
     val halo = remember(item.id) { Animatable(if (reduced) 1f else 0f) }
+    val gloss = remember(item.id) { Animatable(if (reduced) 1.8f else -.7f) }
     LaunchedEffect(item.id, reduced) {
         if (reduced) {
             scale.snapTo(1f)
             halo.snapTo(1f)
+            gloss.snapTo(1.8f)
         } else {
             scale.animateTo(1.12f, spring(dampingRatio = .72f, stiffness = 260f))
             scale.animateTo(1f, spring(dampingRatio = .82f, stiffness = 420f))
             halo.animateTo(1f, tween(520))
+            gloss.animateTo(1.8f, tween(820))
         }
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-            shape = MaterialTheme.shapes.extraLarge,
+            shape = RoundedCornerShape(30.dp),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shadowElevation = 12.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, AppColors.Border.copy(alpha = .46f)),
+            shadowElevation = 18.dp,
         ) {
-            Column(Modifier.padding(horizontal = 26.dp, vertical = 28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(Modifier.size(164.dp), contentAlignment = Alignment.Center) {
-                    Canvas(Modifier.fillMaxSize()) {
-                        val alpha = if (item.target >= 30) .18f else .12f
-                        drawCircle(AppColors.Accent.copy(alpha = alpha * halo.value), radius = size.minDimension * (.28f + .13f * halo.value))
-                        drawCircle(AppColors.Accent.copy(alpha = .22f * halo.value), radius = size.minDimension * (.38f + .06f * halo.value), style = Stroke(size.minDimension * .012f))
-                    }
-                    AchievementMedal(item, Modifier.scale(scale.value), 112.dp)
+            Column(Modifier.padding(horizontal = 24.dp, vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(13.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("COLLECTION", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted, letterSpacing = 1.5.sp)
+                    Text(item.category, style = MaterialTheme.typography.labelSmall, color = AppColors.Accent)
                 }
-                AnimatedVisibility(halo.value > .85f || reduced, enter = fadeIn(tween(motionMillis(220))) + scaleIn(tween(motionMillis(220)))) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("成就已解锁", style = MaterialTheme.typography.labelLarge, color = AppColors.Accent)
-                        Text(item.title, style = MaterialTheme.typography.headlineSmall)
-                        Text(item.condition, style = MaterialTheme.typography.bodyMedium, color = AppColors.Muted)
-                        item.earnedDate?.let { Text("获得日期 · $it", style = MaterialTheme.typography.labelMedium, color = AppColors.Muted) }
+                Box(Modifier.fillMaxWidth().height(206.dp), contentAlignment = Alignment.Center) {
+                    Canvas(Modifier.size(194.dp)) {
+                        val alpha = if (item.target >= 30) .16f else if (item.target >= 7) .13f else .1f
+                        drawCircle(AppColors.Accent.copy(alpha = alpha * halo.value), radius = size.minDimension * (.29f + .1f * halo.value))
+                        drawCircle(AppColors.Accent.copy(alpha = .19f * halo.value), radius = size.minDimension * (.4f + .04f * halo.value), style = Stroke(size.minDimension * .009f))
+                        drawCircle(AppColors.Accent.copy(alpha = .08f * halo.value), radius = size.minDimension * .48f, style = Stroke(size.minDimension * .006f))
+                    }
+                    Box(Modifier.size(158.dp).clip(CircleShape), contentAlignment = Alignment.Center) {
+                        AchievementMedal(item, Modifier.scale(scale.value), 132.dp)
+                        Canvas(Modifier.fillMaxSize()) {
+                            if (!reduced && gloss.value < 1.8f) {
+                                val x = size.width * gloss.value
+                                val half = size.width * .22f
+                                drawRect(
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(Color.Transparent, Color.White.copy(alpha = .2f), Color.Transparent),
+                                        start = Offset(x - half, 0f),
+                                        end = Offset(x + half, size.height),
+                                    ),
+                                )
+                            }
+                        }
                     }
                 }
-                Spacer(Modifier.height(2.dp))
+                AnimatedVisibility(halo.value > .72f || reduced, enter = fadeIn(tween(motionMillis(240))) + scaleIn(tween(motionMillis(240)))) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text("新得一枚", style = MaterialTheme.typography.labelLarge, color = AppColors.Accent)
+                        Text(item.title, style = MaterialTheme.typography.headlineSmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        Text(item.condition, style = MaterialTheme.typography.bodyMedium, color = AppColors.Muted, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        item.earnedDate?.let { Text("获得日期  ·  $it", style = MaterialTheme.typography.labelMedium, color = AppColors.Muted) }
+                    }
+                }
+                Spacer(Modifier.height(1.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("收下") }
-                    TextButton(onClick = onViewAll, modifier = Modifier.weight(1f)) { Text("查看成就") }
+                    androidx.compose.material3.Button(onClick = onViewAll, modifier = Modifier.weight(1f), shape = RoundedCornerShape(AppShape.Control)) { Text("查看成就") }
                 }
             }
         }

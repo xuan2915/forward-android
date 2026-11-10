@@ -75,6 +75,13 @@ object AppSpace {
     val Page = 22.dp
 }
 
+object AppShape {
+    val Card = 22.dp
+    val Panel = 28.dp
+    val Control = 16.dp
+    val Pill = 50.dp
+}
+
 object AppMotion {
     const val Short = 160
     const val Standard = 260
@@ -85,8 +92,8 @@ object AppMotion {
 }
 
 @Composable
-fun FocusTheme(content: @Composable () -> Unit) {
-    GritTheme(content)
+fun FocusTheme(direction: VisualDirection = VisualDirection.Warm, content: @Composable () -> Unit) {
+    GritTheme(direction, content)
 }
 
 @Composable
@@ -109,7 +116,11 @@ fun SectionHeading(title: String, trailing: (@Composable () -> Unit)? = null) {
 @Composable
 fun QuietSurface(modifier: Modifier = Modifier, color:Color = MaterialTheme.colorScheme.surfaceContainer, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(color).padding(16.dp),
+        modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(AppShape.Card))
+            .background(color)
+            .border(0.7.dp, AppColors.Border.copy(alpha = 0.34f), RoundedCornerShape(AppShape.Card))
+            .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         content = content,
     )
@@ -126,7 +137,7 @@ fun PrimaryAction(label: String, onClick: () -> Unit, modifier: Modifier = Modif
         onClick = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onClick() },
         modifier = modifier.height(52.dp).graphicsLayer { scaleX=scale;scaleY=scale },
         enabled = enabled,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(AppShape.Control),
         colors = ButtonDefaults.buttonColors(
             containerColor = AppColors.Accent,
             contentColor = AppColors.AccentInk,
@@ -142,7 +153,7 @@ fun SecondaryAction(label: String, onClick: () -> Unit, modifier: Modifier = Mod
         onClick = onClick,
         modifier = modifier.height(48.dp),
         enabled = enabled,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(AppShape.Control),
         border = BorderStroke(1.dp, if (enabled) AppColors.Border else AppColors.Raised),
         colors = ButtonDefaults.outlinedButtonColors(contentColor = AppColors.Text, disabledContentColor = AppColors.Quiet),
     ) { Text(label, style = MaterialTheme.typography.titleSmall) }
