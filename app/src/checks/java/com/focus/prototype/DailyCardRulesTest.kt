@@ -7,6 +7,9 @@ import org.junit.Test
 class DailyCardRulesTest {
     @Test fun editionsUseStableKeysAndRouteLongQuotesToPaper() {
         assertTrue(CardEdition.fromKey("sky-meadow-v1") == CardEdition.Sky)
+        assertTrue(CardEdition.fromKey("sky-meadow-v1").artwork == R.drawable.daily_rain_harbor)
+        assertTrue(CardEdition.fromKey("paper-terrace-v1").artwork == R.drawable.daily_blue_window)
+        assertTrue(CardEdition.fromKey("legacy-v1").artwork == R.drawable.daily_blue_window)
         assertTrue(CardEdition.fromKey("") == CardEdition.Legacy)
         assertTrue(cardEdition("长".repeat(42), 3) == CardEdition.Paper)
         assertTrue(cardEdition("短句", 3) == CardEdition.Sky)
