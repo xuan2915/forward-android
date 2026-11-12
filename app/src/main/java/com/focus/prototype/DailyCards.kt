@@ -1,62 +1,39 @@
 package com.focus.prototype
 
 import android.graphics.Bitmap
-import android.graphics.Canvas as AndroidCanvas
-import android.view.View
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.Typeface
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.scaleIn
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.fadeIn
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -66,7 +43,6 @@ import org.json.JSONObject
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlin.math.roundToInt
 
 internal data class DailyCardRecord(
     val date: String,
@@ -79,25 +55,21 @@ internal data class DailyCardRecord(
     val valid: Boolean,
 )
 
-private val dailyOriginals = listOf(
-    "薄雾散得很慢，山色便多留了一刻",
-    "雨停以后，路面替天空保存了一会儿",
-    "夜色落在窗边，书页仍亮着一小块",
-    "风穿过空庭，留下几片晴朗",
-    "潮声退去后，沙上还停着月光",
-    "清早的光，沿着桌沿缓缓移动",
-    "河流转弯时，没有惊动岸上的草",
-    "暮云放慢脚步，天色便宽了一些",
-    "石阶记得每一次轻声经过",
-    "远山不说话，云替它翻过一页",
-    "窗外的树影，把午后分成了几行",
-    "一盏灯亮起，夜路就有了边界",
+private data class LiteraryExcerpt(val text: String, val source: String)
+
+private val excerpts = listOf(
+    // https://zh.wikisource.org/wiki/移居
+    LiteraryExcerpt("奇文共欣赏，疑义相与析", "陶渊明 ·《移居》其一"),
+    // https://zh.wikisource.org/wiki/陋室銘
+    LiteraryExcerpt("苔痕上阶绿，草色入帘青\n谈笑有鸿儒，往来无白丁", "刘禹锡 ·《陋室铭》"),
 )
 
-internal fun dailyCardQualifies(tasks: List<Task>): Boolean {
-    val required = tasks.filter { it.required }
-    return required.isNotEmpty() && required.all { it.done }
-}
+private fun excerptFor(date: String, stored: String? = null): LiteraryExcerpt =
+    excerpts.firstOrNull { it.text == stored }
+        ?: excerpts[Math.floorMod(LocalDate.parse(date).toEpochDay(), excerpts.size.toLong()).toInt()]
+
+internal fun dailyCardQualifies(tasks: List<Task>): Boolean =
+    tasks.isNotEmpty() && tasks.all { it.done }
 
 internal object DailyCards {
     private const val PREFIX = "daily_card_"
@@ -109,18 +81,16 @@ internal object DailyCards {
             if (old?.valid == true) db.setSetting(key, encode(old.copy(valid = false)))
             return null
         }
-        val required = tasks.filter { it.required }
-        val allDone = tasks.filter { it.done }
-        val quote = old?.quote ?: dailyOriginals[Math.floorMod(date.hashCode(), dailyOriginals.size)]
+        val quote = excerptFor(date, old?.quote).text
         val record = DailyCardRecord(
             date = date,
             quote = quote,
-            completed = allDone.size,
+            completed = tasks.size,
             total = tasks.size,
-            focusMinutes = allDone.sumOf { it.elapsed }.coerceAtLeast(0L) / 60_000L,
-            taskTitles = allDone.map { it.title },
+            focusMinutes = tasks.sumOf { it.elapsed }.coerceAtLeast(0L) / 60_000L,
+            taskTitles = tasks.map { it.title },
             unlockedAt = old?.unlockedAt ?: System.currentTimeMillis(),
-            valid = required.isNotEmpty(),
+            valid = true,
         )
         if (old != record) db.setSetting(key, encode(record))
         return record.takeIf { it.valid }
@@ -171,195 +141,163 @@ internal object DailyCards {
     }.getOrNull()
 }
 
-/** Paper-like daily keepsake; the image is drawn locally and saved with the system picker. */
-@OptIn(ExperimentalFoundationApi::class)
+
+/** The preview and PNG share one layout measured independently of the screen viewport. */
+private fun renderDailyCard(record: DailyCardRecord, artwork: Bitmap): Bitmap {
+    val width = 960
+    val inset = 62f
+    val columnWidth = (width - inset * 2).toInt()
+    val paper = AppColors.Paper.toArgb()
+    val ink = AppColors.PaperInk.toArgb()
+    val muted = AppColors.PaperMuted.toArgb()
+    val date = LocalDate.parse(record.date)
+    val excerpt = excerptFor(record.date, record.quote)
+    val serif = Typeface.create("serif", Typeface.NORMAL)
+    val sans = Typeface.create("sans-serif", Typeface.NORMAL)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+    fun paragraph(text: String, size: Float, font: Typeface, color: Int): StaticLayout {
+        val style = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = size
+            typeface = font
+            this.color = color
+        }
+        return StaticLayout.Builder.obtain(text, 0, text.length, style, columnWidth)
+            .setBreakStrategy(Layout.BREAK_STRATEGY_BALANCED)
+            .setLineSpacing(9f, 1f)
+            .build()
+    }
+
+    val quote = paragraph(excerpt.text, 62f, serif, ink)
+    val attribution = paragraph(excerpt.source, 32f, sans, muted)
+    val artworkTop = 285
+    val artworkHeight = 500
+    val quoteTop = artworkTop + artworkHeight + 54
+    val attributionTop = quoteTop + quote.height + 14
+    val ruleY = attributionTop + attribution.height + 55f
+    val bitmap = Bitmap.createBitmap(width, (ruleY + 146).toInt(), Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    canvas.drawColor(paper)
+
+    fun text(value: String, x: Float, y: Float, size: Float, font: Typeface, color: Int, end: Boolean = false) {
+        paint.apply {
+            textAlign = if (end) Paint.Align.RIGHT else Paint.Align.LEFT
+            textSize = size
+            typeface = font
+            this.color = color
+        }
+        canvas.drawText(value, x, y, paint)
+    }
+
+    fun drawParagraph(layout: StaticLayout, y: Int) {
+        canvas.save()
+        canvas.translate(inset, y.toFloat())
+        layout.draw(canvas)
+        canvas.restore()
+    }
+
+    text(date.dayOfMonth.toString().padStart(2, '0'), inset, 223f, 216f, serif, ink)
+    val right = width - inset
+    text("${date.year} 年 ${date.monthValue} 月", right, 145f, 37f, sans, ink, end = true)
+    text(date.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, Locale.CHINA),
+        right, 201f, 31f, sans, muted, end = true)
+
+    val cropHeight = (artwork.width.toFloat() * artworkHeight / columnWidth).toInt()
+    val cropWidth = (artwork.height.toFloat() * columnWidth / artworkHeight).toInt()
+    val source = if (cropHeight <= artwork.height) {
+        val top = (artwork.height - cropHeight) / 2
+        Rect(0, top, artwork.width, top + cropHeight)
+    } else {
+        val left = (artwork.width - cropWidth) / 2
+        Rect(left, 0, left + cropWidth, artwork.height)
+    }
+    canvas.drawBitmap(artwork, source,
+        Rect(inset.toInt(), artworkTop, right.toInt(), artworkTop + artworkHeight), paint)
+    drawParagraph(quote, quoteTop)
+    drawParagraph(attribution, attributionTop)
+    paint.color = AppColors.PaperRule.toArgb()
+    paint.strokeWidth = 2f
+    canvas.drawLine(inset, ruleY, right, ruleY, paint)
+    text("完成 ${record.completed} 项  ·  专注 ${record.focusMinutes} 分钟", inset, ruleY + 74f, 32f, sans, ink)
+    text("向前", right, ruleY + 74f, 32f, serif, muted, end = true)
+    return bitmap
+}
+
 @Composable
-internal fun DailyCardView(record: DailyCardRecord, modifier: Modifier = Modifier) {
+private fun DailyCardDialog(record: DailyCardRecord, onDismiss: () -> Unit) {
     val context = LocalContext.current
-    val view = LocalView.current
-    val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
-    val bringIntoViewRequester = remember(record.date) { BringIntoViewRequester() }
-    var cardCoordinates by remember(record.date) { mutableStateOf<LayoutCoordinates?>(null) }
-    var bitmapToSave by remember { mutableStateOf<Bitmap?>(null) }
+    val bitmap = remember(record) {
+        val art = BitmapFactory.decodeResource(context.resources, R.drawable.daily_landscape)
+        try { renderDailyCard(record, art) } finally { art.recycle() }
+    }
     var saveStatus by remember { mutableStateOf("") }
-    val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
-        val bitmap = bitmapToSave
-        bitmapToSave = null
-        if (uri != null && bitmap != null) scope.launch {
-            val result = runCatching {
-                withContext(Dispatchers.IO) {
-                    context.contentResolver.openOutputStream(uri)?.use { stream ->
-                        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream))
-                    } ?: error("无法写入所选位置")
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
+        if (uri != null) scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val stream = checkNotNull(context.contentResolver.openOutputStream(uri))
+                    stream.use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
                 }
             }
             saveStatus = if (result.isSuccess) "卡片已保存" else "保存失败，请重试"
-            bitmap.recycle()
-        } else bitmap?.recycle()
-    }
-
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        PaperArtwork(record, Modifier.bringIntoViewRequester(bringIntoViewRequester).onGloballyPositioned { cardCoordinates = it })
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = {
-                scope.launch {
-                    bringIntoViewRequester.bringIntoView()
-                    withFrameNanos { }
-                    val coordinates = cardCoordinates
-                    val bitmap = coordinates?.let { captureCard(view, it, density.density) }
-                    if (bitmap == null) saveStatus = "卡片暂时无法生成图片"
-                    else {
-                        bitmapToSave = bitmap
-                        saveLauncher.launch("向前-每日卡片-${record.date}.png")
-                    }
-                }
-            }) { Text("保存为图片") }
-            Spacer(Modifier.weight(1f))
-            Text(saveStatus, style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
+            if (result.isSuccess) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         }
     }
-}
-
-private fun captureCard(view: View, coordinates: LayoutCoordinates, density: Float): Bitmap? = runCatching {
-    val bounds = coordinates.boundsInRoot()
-    val left = bounds.left.roundToInt().coerceAtLeast(0)
-    val top = bounds.top.roundToInt().coerceAtLeast(0)
-    val right = bounds.right.roundToInt().coerceAtMost(view.width)
-    val bottom = bounds.bottom.roundToInt().coerceAtMost(view.height)
-    require(right > left && bottom > top)
-    val full = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
-    view.draw(AndroidCanvas(full))
-    val cropped = Bitmap.createBitmap(full, left, top, right - left, bottom - top)
-    full.recycle()
-    val targetWidth = maxOf(cropped.width, (360f * density).roundToInt())
-    if (targetWidth == cropped.width) cropped else {
-        val targetHeight = (cropped.height.toFloat() * targetWidth / cropped.width).roundToInt()
-        Bitmap.createScaledBitmap(cropped, targetWidth, targetHeight, true).also { cropped.recycle() }
-    }
-}.getOrNull()
-
-@Composable
-private fun PaperArtwork(record: DailyCardRecord, modifier: Modifier = Modifier) {
-    val paper = Color(0xFFF2EBDD)
-    val ink = Color(0xFF292521)
-    val softInk = Color(0xFF75685B)
-    val line = Color(0xFFBDB09C)
-    val accent = Color(0xFFB87958)
-    val date = LocalDate.parse(record.date)
-    Surface(
-        modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(4.dp),
-        color = paper,
-        border = androidx.compose.foundation.BorderStroke(1.dp, line.copy(alpha = .72f)),
-        shadowElevation = 3.dp,
-    ) {
-        Column(Modifier.padding(horizontal = 22.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("DAILY NOTE  /  向前", style = MaterialTheme.typography.labelSmall, color = softInk, letterSpacing = 1.4.sp)
-                    Text("向前原创", style = MaterialTheme.typography.labelSmall, color = accent)
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(date.month.getDisplayName(java.time.format.TextStyle.SHORT, Locale.ENGLISH).uppercase(), style = MaterialTheme.typography.labelMedium, color = softInk, letterSpacing = 1.6.sp)
-                    Text(date.dayOfMonth.toString().padStart(2, '0'), style = MaterialTheme.typography.displayLarge.copy(fontFamily = FontFamily.Serif, fontSize = 64.sp, fontWeight = FontWeight.Light, lineHeight = 64.sp), color = ink)
-                    Text(date.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, Locale.CHINESE), style = MaterialTheme.typography.labelSmall, color = softInk)
+    val excerpt = excerptFor(record.date, record.quote)
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = MaterialTheme.shapes.medium, color = AppColors.Surface) {
+            Column(Modifier.fillMaxWidth().padding(AppSpace.Small)) {
+                Image(
+                    bitmap.asImageBitmap(),
+                    "${record.date}，${excerpt.text}，${excerpt.source}，完成 ${record.completed} 项，专注 ${record.focusMinutes} 分钟",
+                    Modifier.weight(1f, fill = false).fillMaxWidth(),
+                )
+                if (saveStatus.isNotEmpty()) Text(saveStatus, Modifier.padding(horizontal = AppSpace.Medium))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(onClick = onDismiss) { Text("关闭") }
+                    TextButton(onClick = { save.launch("向前-${record.date}.png") }) { Text("保存为图片") }
                 }
             }
-            Text(
-                record.quote,
-                modifier = Modifier.padding(top = 1.dp, bottom = 1.dp),
-                style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Serif, fontWeight = FontWeight.Normal, lineHeight = 31.sp),
-                color = ink,
-            )
-            TopographicArtwork(Modifier.fillMaxWidth().height(88.dp), line, accent)
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                record.taskTitles.take(3).forEach { title ->
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Canvas(Modifier.size(5.dp)) { drawCircle(accent) }
-                        Text(title, style = MaterialTheme.typography.bodySmall, color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-                if (record.completed > 3) Text("另有 ${record.completed - 3} 项完成记录", style = MaterialTheme.typography.labelSmall, color = softInk)
-            }
-            Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("今日完成", style = MaterialTheme.typography.labelSmall, color = softInk)
-                    Text("${record.completed} / ${record.total} 项", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold), color = ink)
-                }
-                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("有效专注", style = MaterialTheme.typography.labelSmall, color = softInk)
-                    Text("${record.focusMinutes} 分钟", style = MaterialTheme.typography.titleSmall, color = ink)
-                }
-            }
-            Spacer(Modifier.height(2.dp))
-            Canvas(Modifier.fillMaxWidth().height(1.dp)) { drawLine(line, Offset.Zero, Offset(size.width, 0f), 1.dp.toPx()) }
-            Text("一日一页  ·  ${date.format(DateTimeFormatter.ofPattern("yyyy.MM.dd"))}", style = MaterialTheme.typography.labelSmall, color = softInk)
-        }
-    }
-}
-
-@Composable
-private fun TopographicArtwork(modifier: Modifier, line: Color, accent: Color) {
-    Canvas(modifier) {
-        val cx = size.width * .73f
-        val cy = size.height * .45f
-        drawCircle(accent.copy(alpha = .12f), radius = size.height * .36f, center = Offset(cx, cy))
-        drawCircle(accent.copy(alpha = .68f), radius = size.height * .14f, center = Offset(cx, cy))
-        for (index in 0..5) {
-            val inset = index * size.height * .075f
-            val path = Path().apply {
-                moveTo(size.width * .02f, size.height * (.68f - index * .035f))
-                cubicTo(size.width * .18f, size.height * .18f + inset, size.width * .36f, size.height * .92f - inset, size.width * .52f, size.height * .49f)
-                cubicTo(size.width * .68f, size.height * .08f + inset, size.width * .82f, size.height * .88f - inset, size.width * .98f, size.height * .27f + inset)
-            }
-            drawPath(path, line.copy(alpha = .45f - index * .045f), style = Stroke(width = .8.dp.toPx()))
         }
     }
 }
 
 @Composable
 internal fun DailyCardArchive(cards: List<DailyCardRecord>) {
-    var selected by remember { mutableStateOf<DailyCardRecord?>(null) }
-    if (cards.isNotEmpty()) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SectionHeading("每日卡片", trailing = { Text("${cards.size} 张", color = AppColors.Muted, style = MaterialTheme.typography.labelMedium) })
-            cards.forEachIndexed { index, card ->
-                if (index == 0) DailyCardView(card)
-                else Surface(
-                    onClick = { selected = card },
-                    shape = RoundedCornerShape(AppShape.Card),
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                ) {
-                    Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(LocalDate.parse(card.date).format(DateTimeFormatter.ofPattern("yyyy年M月d日 E", Locale.CHINA)), style = MaterialTheme.typography.titleSmall)
-                            Text("${card.completed} 项完成 · 专注 ${card.focusMinutes} 分钟", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-                        }
-                        Text("查看", style = MaterialTheme.typography.labelMedium, color = AppColors.Accent)
-                    }
-                }
-            }
-        }
-    }
-    selected?.let { card ->
-        Dialog(onDismissRequest = { selected = null }) {
-            Surface(shape = RoundedCornerShape(AppShape.Card), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DailyCardView(card)
-                    TextButton(onClick = { selected = null }, modifier = Modifier.align(Alignment.End)) { Text("关闭") }
-                }
-            }
-        }
+    Column(verticalArrangement = Arrangement.spacedBy(AppSpace.Small)) {
+        SectionHeading("每日纪念")
+        cards.forEach { card -> DailyCardReveal(card) }
     }
 }
 
 @Composable
-internal fun DailyCardReveal(record: DailyCardRecord?) {
-    if (record != null) {
-        AnimatedVisibility(
-            visible = true,
-            enter = fadeIn(tween(motionMillis(460))) + expandVertically(tween(motionMillis(520))) + scaleIn(initialScale = .985f, animationSpec = tween(motionMillis(520))),
-        ) { DailyCardView(record) }
+internal fun DailyCardReveal(record: DailyCardRecord) {
+    var open by remember(record.date) { mutableStateOf(false) }
+    val day = remember(record.date) {
+        LocalDate.parse(record.date).format(DateTimeFormatter.ofPattern("M月d日 · E", Locale.CHINA))
     }
+    val reveal = remember(record.date) { MutableTransitionState(false).apply { targetState = true } }
+    AnimatedVisibility(visibleState = reveal, enter = fadeIn(tween(motionMillis(300)))) {
+    Surface(
+        onClick = { open = true },
+        color = AppColors.Paper,
+        contentColor = AppColors.PaperInk,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(AppSpace.Medium), horizontalArrangement = Arrangement.spacedBy(AppSpace.Medium),
+            verticalAlignment = Alignment.CenterVertically) {
+            Image(painterResource(R.drawable.daily_landscape), contentDescription = null,
+                modifier = Modifier.size(width = 62.dp, height = 48.dp), contentScale = ContentScale.Crop)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(AppSpace.Tiny)) {
+                Text("每日纪念", style = MaterialTheme.typography.titleMedium)
+                Text(day, style = MaterialTheme.typography.labelMedium, color = AppColors.PaperMuted)
+            }
+            Text("查看", style = MaterialTheme.typography.labelLarge)
+        }
+    }
+    }
+    if (open) DailyCardDialog(record) { open = false }
 }

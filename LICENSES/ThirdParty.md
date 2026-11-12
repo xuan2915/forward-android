@@ -2,7 +2,7 @@
 
 - `com.kizitonwose.calendar:compose:2.6.1` — MIT License. Used for the interactive history calendar.
 - `com.patrykandpatrick.vico:compose-m3:1.16.0` — Apache License 2.0. Used for the real seven-day completion trend chart.
-- `com.materialkolor:material-kolor:1.7.1` — MIT License. Retained for palette utilities compatible with this app's Compose/AGP toolchain; the current warm and mineral schemes are app-owned and no longer use Grit's seed palette. The included Google Material Color Utilities code is Apache-2.0.
+- `com.materialkolor:material-kolor:1.7.1` — MIT License. The included Google Material Color Utilities code is Apache-2.0. The 0.10.1 theme uses explicit color tokens in place of the previous seed-based palette.
 - `android/compose-samples` (Jetsnack) — studied for Compose design-system organization and component consistency; no source files or assets were copied.
 - Grit UI source is now adapted under GPL-3.0-or-later; see Grit-PORT.md and the retained file headers.
 - Grit's task-list and growth-statistics page structure, task card, streak heatmap and calendar-day treatment remain adapted; the theme colors and general typography are app-owned. See Grit-PORT.md for exact source-to-file mapping.

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -46,7 +47,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -93,7 +93,7 @@ fun TaskDetailSheet(
         enter = fadeIn(tween(AppMotion.Short)),
         exit = fadeOut(tween(AppMotion.Short)),
     ) {
-        Box(Modifier.fillMaxSize()) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.56f)).clickable { dismiss() })
             AnimatedVisibility(
                 visible = visible,
@@ -103,13 +103,13 @@ fun TaskDetailSheet(
             ) {
                 Column(
                     Modifier.fillMaxWidth()
-                        .heightIn(max = LocalConfiguration.current.screenHeightDp.dp * 0.92f)
+                        .heightIn(max = maxHeight * .91f)
                         .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp))
                         .navigationBarsPadding().imePadding()
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 24.dp).padding(bottom = 22.dp)
+                        .padding(horizontal = AppSpace.Page).padding(bottom = AppSpace.Large)
                         .animateContentSize(motionSizeSpec()),
-                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(AppSpace.Medium),
                 ) {
                     Box(Modifier.fillMaxWidth().padding(top = 12.dp).height(16.dp), contentAlignment = Alignment.Center) {
                         Surface(Modifier.width(36.dp).height(4.dp), shape = RoundedCornerShape(50), color = AppColors.Muted) {}
@@ -117,7 +117,7 @@ fun TaskDetailSheet(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(if (task.required) "必做任务" else "选做任务", style = MaterialTheme.typography.labelLarge, color = AppColors.Muted)
-                    Text(task.title, style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
+                    Text(task.title, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold))
                 }
                 StatusPill(when {
                     task.done -> "已完成"
@@ -128,11 +128,11 @@ fun TaskDetailSheet(
             }
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(if (task.minutes > 0) "${focusDuration(elapsed)} / ${task.minutes} 分钟" else focusDuration(elapsed), style = MaterialTheme.typography.titleMedium)
                     Text("专注记录", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
                 }
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(completionMode, style = MaterialTheme.typography.titleMedium)
                     Text("完成方式", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
                 }
@@ -157,7 +157,7 @@ fun TaskDetailSheet(
             if (task.done) {
                 if (task.required && (task.rewardMinutes>0 || task.rewardGames>0)) {
                     Text("本项奖励已自动到账："+buildList{if(task.rewardMinutes>0)add("${task.rewardMinutes} 分钟");if(task.rewardGames>0)add("${task.rewardGames} 局")}.joinToString(" · "),style=MaterialTheme.typography.bodyMedium,color=AppColors.Muted)
-                } else if (!task.required && !task.claimed) {
+                } else if (!task.required && !task.claimed && (task.rewardMinutes > 0 || task.rewardGames > 0)) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("领取一项奖励", style = MaterialTheme.typography.titleMedium)
                         Text("每项选做奖励限领一次", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)

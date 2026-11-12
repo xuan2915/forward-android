@@ -6,7 +6,7 @@ Upstream: [shub39/Grit](https://github.com/shub39/Grit), source snapshot `e664ff
 
 | Grit source | Self Discipline adaptation | Status |
 | --- | --- | --- |
-| `shared/ui/.../theme/GritTheme.android.kt` | `app/src/main/java/com/focus/prototype/GritTheme.kt` | Grit's dark TONALSPOT structure and Android system-bar adaptation inform the theme; current warm and mineral palettes are app-owned and selectable. |
+| `shared/ui/.../theme/GritTheme.android.kt` | `app/src/main/java/com/focus/prototype/GritTheme.kt` | Android system-bar adaptation and Material theme structure. The 0.10.1 palette uses app-owned graphite surfaces and separate interaction, reward, and status colors. |
 | `shared/ui/.../theme/ProvideTypography.kt` | `GritTypography.kt`, `res/font/google_sans_flex.ttf`, `res/font/poppins_regular.ttf` | Grit's display-font resources remain available for selected emphases. The 0.10.0 general text hierarchy uses platform Sans Serif for a quieter editorial direction. Font OFL files are in this folder. |
 | `shared/ui/.../task/ui/section/TaskList.kt` | `GritPortedPages.kt` `GritTaskListPage` | Page hierarchy adapted from Grit's large task header, horizontal category selector, grouped compact list and add action. Self Discipline keeps its required/optional filters and plan action. |
 | `shared/ui/.../task/ui/component/TaskCard.kt` | `GritPortedPages.kt` `GritTaskListCard` | Compact title-only Grit task row, bold typography, completion strike-through, state colors and connected shapes. Tapping opens the existing verification/detail flow instead of bypassing it. |

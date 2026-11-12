@@ -36,6 +36,23 @@ import androidx.compose.ui.unit.dp
 }
 
 @Composable fun DaySettings(db:Database,onChanged:()->Unit) {
- var hour by remember { mutableStateOf(db.setting("boundary","4")) }
- Column { Text("任务 00:00 更新 · 奖励额度默认 04:00 重置"); OutlinedTextField(hour,onValueChange={hour=it.filter(Char::isDigit).take(2)},label={Text("额度重置时间（0–23 点）")}); Button(enabled=(hour.toIntOrNull()?:-1) in 0..23,onClick={db.scheduleBoundary(hour.toInt());onChanged()}){Text("设置额度重置时间")}; val pending=db.setting("boundary_effective"); if(pending.isNotBlank()) Text("生效时间：$pending · 历史任务与奖励不重新结算") }
+    var hour by remember { mutableStateOf(db.setting("boundary", "4")) }
+    val nextHour = hour.toIntOrNull()?.takeIf { it in 0..23 }
+    QuietSurface {
+        Text("奖励额度重置", style = MaterialTheme.typography.titleMedium)
+        Text("任务每天 00:00 更新 · 奖励默认 04:00 重置",
+            color = AppColors.Muted, style = MaterialTheme.typography.bodySmall)
+        OutlinedTextField(
+            hour, onValueChange = { hour = it.filter { ch -> ch in '0'..'9' }.take(2) },
+            label = { Text("重置时间（0–23 点）") },
+            singleLine = true, modifier = Modifier.fillMaxWidth(),
+        )
+        SecondaryAction("保存重置时间", {
+            nextHour?.let { db.scheduleBoundary(it); onChanged() }
+        }, enabled = nextHour != null)
+        val pending = db.setting("boundary_effective")
+        if (pending.isNotBlank()) {
+            Text("生效时间 · $pending", color = AppColors.Muted, style = MaterialTheme.typography.bodySmall)
+        }
+    }
 }

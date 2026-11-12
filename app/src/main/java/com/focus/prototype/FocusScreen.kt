@@ -39,6 +39,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
@@ -50,7 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.BoxWithConstraints
 
-/** Focus view: calm typography and a horizontal elapsed-time rail instead of a dial. */
+/** The clock supplies the progress; the vessel only renders it. */
 @Composable
 fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () -> Unit, onChanged: () -> Unit) {
     val selected = db.task(timer.taskId)?.takeUnless { it.done }
@@ -74,14 +78,14 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
     }
     val fraction = when {
         phase == "ready" -> 0f
-        freeMode -> 0f
+        freeMode -> 1f - kotlin.math.abs(1f - (elapsed % 120_000L) / 60_000f)
         isRest -> 1f - remaining.toFloat() / mode.breakMillis.coerceAtLeast(1L)
         else -> 1f - remaining.toFloat() / mode.workMillis.coerceAtLeast(1L)
     }.coerceIn(0f, 1f)
     val animatedFraction by animateFloatAsState(
         fraction,
-        tween(motionMillis(1100), easing = AppMotion.Ease),
-        label = "focus-timeline",
+        tween(motionMillis(850), easing = androidx.compose.animation.core.LinearEasing),
+        label = "focus-vessel",
     )
     val phaseColor by animateColorAsState(
         targetValue = if (isRest) MaterialTheme.colorScheme.secondary else AppColors.Accent,
@@ -90,6 +94,14 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
     )
     val running = phase == "work" || phase == "break"
     val activeTask = phase == "work" || phase == "paused" && pausedFrom == "work"
+    val status = when {
+        phase == "break" && timer.notice == "本轮完成" -> "本轮完成"
+        phase == "ready" && timer.notice == "休息结束" -> "休息结束"
+        phase == "work" -> "专注中"
+        phase == "break" -> "休息中"
+        phase == "paused" -> "已暂停"
+        else -> "准备专注"
+    }
 
     Column(
         Modifier.fillMaxWidth().animateContentSize(motionSizeSpec()).padding(top = AppSpace.Medium, bottom = AppSpace.Large),
@@ -97,8 +109,8 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
         verticalArrangement = Arrangement.spacedBy(AppSpace.Large),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            PageHeading("FOCUS · 今日任务", "专注时间")
-            StatusPill(when (phase) { "work" -> "专注中"; "break" -> "休息中"; "paused" -> "已暂停"; else -> "准备专注" }, active = running)
+            Text("专注", style = MaterialTheme.typography.headlineSmall)
+            StatusPill(status, active = running)
         }
 
         if (phase == "ready") {
@@ -210,84 +222,82 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
 private fun FocusTimerStage(time: String, phase: String, fraction: Float, free: Boolean, rest: Boolean, tint: Color, duration: String) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(AppShape.Panel),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = androidx.compose.foundation.BorderStroke(0.8.dp, AppColors.Border.copy(alpha = .48f)),
+        shape = MaterialTheme.shapes.large,
+        color = AppColors.Surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, AppColors.Border),
     ) {
-        Column(Modifier.padding(horizontal = 22.dp, vertical = 22.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(duration.uppercase(), style = MaterialTheme.typography.labelSmall, color = AppColors.Muted, letterSpacing = 1.2.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Canvas(Modifier.size(7.dp)) { drawCircle(tint.copy(alpha = if (phase == "work" || phase == "break") .95f else .45f)) }
-                    Text(when (phase) { "work" -> "专注中"; "break" -> "休息中"; "paused" -> "已暂停"; else -> "准备专注" }, style = MaterialTheme.typography.labelMedium, color = AppColors.Muted)
-                }
+        Column(
+            Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(duration, style = MaterialTheme.typography.labelMedium, color = AppColors.Muted)
+            BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                val digitSize = with(LocalDensity.current) { (maxWidth / if (time.length > 5) 5.3f else 4.3f).toSp() }
+                Text(
+                    time,
+                    style = MaterialTheme.typography.displayLarge.copy(
+                        fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Light,
+                        fontSize = digitSize, lineHeight = digitSize * 1.12f, letterSpacing = (-2).sp,
+                    ),
+                    maxLines = 1, softWrap = false,
+                )
             }
-            BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                val fontSize = with(LocalDensity.current) { (maxWidth * .205f).toSp() }
-                val digitMotion = motionMillis(130)
-                AnimatedContent(
-                    targetState = time,
-                    transitionSpec = {
-                        (slideInVertically(tween(digitMotion, easing = AppMotion.Ease)) { it / 7 } + fadeIn(tween(digitMotion))) togetherWith
-                            (slideOutVertically(tween(digitMotion, easing = AppMotion.Ease)) { -it / 8 } + fadeOut(tween(digitMotion)))
-                    },
-                    label = "focus-digits",
-                ) { shown ->
-                    Text(
-                        shown,
-                        style = MaterialTheme.typography.displayLarge.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Light, fontSize = fontSize, letterSpacing = (-2).sp),
-                        color = AppColors.Text,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(if (free) "已专注" else if (rest) "休息进度" else "本轮进度", style = MaterialTheme.typography.labelMedium, color = AppColors.Muted)
-                Text(if (free) "计时中" else "${(fraction * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, color = tint)
-            }
-            FocusTimeline(fraction, free, tint)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(if (free) "开始后累计" else if (rest) "放慢一点" else "开始", style = MaterialTheme.typography.labelSmall, color = AppColors.Quiet)
-                Text(if (free) "不设时限" else if (rest) "恢复专注" else duration, style = MaterialTheme.typography.labelSmall, color = AppColors.Quiet)
-            }
+            FocusVessel(fraction, free, tint)
+            Text(
+                when {
+                    phase == "paused" -> "已暂停"
+                    free -> "自由计时"
+                    rest -> "休息进度 ${(fraction * 100).toInt()}%"
+                    else -> "本轮进度 ${(fraction * 100).toInt()}%"
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = AppColors.Muted,
+            )
         }
     }
 }
 
 @Composable
-private fun FocusTimeline(fraction: Float, free: Boolean, tint: Color) {
-    val insetColor = MaterialTheme.colorScheme.surfaceContainerLow
-    Canvas(Modifier.fillMaxWidth().height(22.dp)) {
-        val centerY = size.height / 2f
-        val radius = 5.dp.toPx()
-        val left = radius
-        val right = size.width - radius
-        val trackHeight = 5.dp.toPx()
-        drawRoundRect(
-            color = AppColors.Raised,
-            topLeft = Offset(left, centerY - trackHeight / 2f),
-            size = androidx.compose.ui.geometry.Size(right - left, trackHeight),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(trackHeight / 2f),
-        )
-        if (!free && fraction > 0f) {
-            val progressWidth = (right - left) * fraction.coerceIn(0f, 1f)
-            drawRoundRect(
-                color = tint,
-                topLeft = Offset(left, centerY - trackHeight / 2f),
-                size = androidx.compose.ui.geometry.Size(progressWidth.coerceAtLeast(trackHeight), trackHeight),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(trackHeight / 2f),
-            )
+private fun FocusVessel(fraction: Float, free: Boolean, tint: Color) {
+    Canvas(Modifier.size(width = 90.dp, height = 104.dp)) {
+        val x = size.width
+        val y = size.height
+        val outline = Path().apply {
+            moveTo(.16f * x, .09f * y)
+            lineTo(.84f * x, .09f * y)
+            cubicTo(.84f*x, .32f*y, .66f*x, .37f*y, .54f*x, .48f*y)
+            cubicTo(.50f*x, .52f*y, .84f*x, .63f*y, .84f*x, .91f*y)
+            lineTo(.16f * x, .91f * y)
+            cubicTo(.16f*x, .63f*y, .50f*x, .52f*y, .46f*x, .48f*y)
+            cubicTo(.34f*x, .37f*y, .16f*x, .32f*y, .16f*x, .09f*y)
+            close()
         }
-        if (!free) {
-            for (mark in 1..3) {
-                val x = left + (right - left) * mark / 4f
-                drawLine(AppColors.Background.copy(alpha = .52f), Offset(x, centerY - 7.dp.toPx()), Offset(x, centerY + 7.dp.toPx()), 1.dp.toPx(), cap = StrokeCap.Round)
+        drawPath(outline, AppColors.Background)
+        clipPath(outline) {
+            val bottom = y * (.91f - .37f * fraction)
+            val top = y * (.13f + .36f * fraction)
+            if (!free) drawRect(tint.copy(alpha = .55f), Offset(0f, top), Size(x, (y * .49f - top).coerceAtLeast(0f)))
+            if (fraction > 0f) {
+                val sand = Path().apply {
+                    moveTo(0f, bottom + y * .05f)
+                    quadraticTo(x * .46f, bottom - y * .05f, x, bottom + y * .035f)
+                    lineTo(x, y)
+                    lineTo(0f, y)
+                    close()
+                }
+                drawPath(sand, tint)
+                for (grain in 0..5) {
+                    val grainY = y * (.51f + (grain * .068f + fraction * 2f) % .35f)
+                    if (grainY < bottom) drawCircle(tint.copy(alpha = .55f), 1.dp.toPx(), Offset(x * .50f, grainY))
+                }
             }
         }
-        val markerX = if (free) right else left + (right - left) * fraction.coerceIn(0f, 1f)
-        drawCircle(tint, radius = radius, center = Offset(markerX, centerY))
-        drawCircle(insetColor, radius = 1.7.dp.toPx(), center = Offset(markerX, centerY))
+        drawPath(outline, AppColors.Muted.copy(alpha = .58f), style = Stroke(1.15.dp.toPx()))
+        for (edge in listOf(.055f, .915f)) {
+            drawRoundRect(AppColors.Border, Offset(x * .10f, y * edge),
+                Size(x * .80f, y * .03f), CornerRadius(2.dp.toPx()))
+        }
     }
 }
 

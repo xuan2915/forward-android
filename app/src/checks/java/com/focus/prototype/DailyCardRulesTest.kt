@@ -9,8 +9,8 @@ class DailyCardRulesTest {
         assertFalse(dailyCardQualifies(emptyList()))
     }
 
-    @Test fun optionalOnlyDayDoesNotCreateCard() {
-        assertFalse(dailyCardQualifies(listOf(task(required = false, done = true))))
+    @Test fun completedOptionalOnlyDayCreatesCard() {
+        assertTrue(dailyCardQualifies(listOf(task(required = false, done = true))))
     }
 
     @Test fun everyRequiredTaskMustBeComplete() {
@@ -21,8 +21,19 @@ class DailyCardRulesTest {
         assertFalse(dailyCardQualifies(listOf(task(required = true, done = false))))
     }
 
-    @Test fun optionalTasksDoNotBlockCompletedRequiredTasks() {
-        assertTrue(dailyCardQualifies(listOf(task(required = true, done = true), task(required = false, done = false))))
+    @Test fun unfinishedOptionalTaskBlocksCard() {
+        assertFalse(dailyCardQualifies(listOf(task(required = true, done = true), task(required = false, done = false))))
+    }
+
+    @Test fun singleCompletedTaskCreatesCard() {
+        assertTrue(dailyCardQualifies(listOf(task(required = true, done = true))))
+    }
+
+    @Test fun mixedDayIsReevaluatedAfterUndo() {
+        val required = task(required = true, done = true)
+        val optional = task(required = false, done = true)
+        assertTrue(dailyCardQualifies(listOf(required, optional)))
+        assertFalse(dailyCardQualifies(listOf(required, optional.copy(done = false))))
     }
 
     private fun task(required: Boolean, done: Boolean) = Task(

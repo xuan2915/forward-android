@@ -48,7 +48,6 @@ class MainActivity : ComponentActivity() {
  override fun onResume() { super.onResume(); refresh++ }
  override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState)
   window.useDarkSystemBars()
-  val visualDirection = if (BuildConfig.DEBUG) VisualDirection.fromKey(intent.getStringExtra("visual_direction")) else VisualDirection.Warm
   receiveText(intent)
   val db = Database(this); val store = Store(this)
   val focusTimer=FocusTimer(db);focusTimer.reconcileBoot()
@@ -64,15 +63,15 @@ class MainActivity : ComponentActivity() {
    LaunchedEffect(shareVersion) { if(shareVersion>0) { page=5;editor=false } }
    LaunchedEffect(Unit) { while(true) { db.settleToday();focusTimer.advance();if(now%10L==0L)db.checkpoint();now++; delay(1000) } }
    val tick = now + refresh; val today = db.day(); val c = remember(today,tick) { db.contract(today) }; val tasks = remember(today,refresh) { db.tasks(today) }; val continuing = remember(today,refresh) { db.runningTasks().filter { it.date != today } }
-   var dailyCardRecords by remember { mutableStateOf(DailyCards.read(db)) }
+   var dailyCardRecords by remember { mutableStateOf(emptyList<DailyCardRecord>()) }
    LaunchedEffect(today,refresh) { dailyCardRecords = DailyCards.reconcileAll(db,today) }
    val protected = remember(tick) { val id = ComponentName(this,FocusService::class.java).flattenToString(); FocusService.connected && Settings.Secure.getString(contentResolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)?.split(':')?.any { it.equals(id,true) } == true }
    LaunchedEffect(refresh) { if (newAchievement == null) newAchievement = nextUnseenAchievement(db) }
-   FocusTheme(visualDirection) { MotionHost(db.xp(),showToast=page!=2) {
+   FocusTheme { MotionHost(db.xp(),showToast=page!=2 && taskDetailsId==null && newAchievement==null) {
        androidx.activity.compose.BackHandler(enabled=allAchievements || gritAnalyticsTaskId!=null || page==5 || editor || showContractDialog) {
         when { showContractDialog -> showContractDialog=false; allAchievements -> allAchievements=false; gritAnalyticsTaskId!=null -> gritAnalyticsTaskId=null; editor -> editor=false; else -> page=0 }
        }
-     Scaffold(containerColor=AppColors.Background, bottomBar = { if(taskDetailsId==null && gritAnalyticsTaskId==null && !allAchievements) AppNavigation(page){page=it;editor=false;gritAnalyticsTaskId=null;allAchievements=false;dismissTaskActions();showContractDialog=false} }) { pad ->
+     Scaffold(containerColor=AppColors.Background, bottomBar = { if(taskDetailsId==null && gritAnalyticsTaskId==null && !allAchievements && page!=5) AppNavigation(page){page=it;editor=false;gritAnalyticsTaskId=null;allAchievements=false;dismissTaskActions();showContractDialog=false} }) { pad ->
      Box(Modifier.fillMaxSize()) {
       AnimatedContent(targetState=page,transitionSpec={fadeIn(tween(AppMotion.Standard))+slideInHorizontally(tween(AppMotion.Standard)){it/28} togetherWith fadeOut(tween(AppMotion.Short))+slideOutHorizontally(tween(AppMotion.Short)){ -it/36 }},label="page-transition") { screen ->
       if (!editor && screen == 0) {
@@ -94,7 +93,7 @@ class MainActivity : ComponentActivity() {
        GritHabitAnalyticsPage(db,gritAnalyticsTaskId!!,refresh, Modifier.padding(pad)) { gritAnalyticsTaskId=null }
       } else {
      val listState=remember(screen){androidx.compose.foundation.lazy.LazyListState()}
-     LazyColumn(state=listState,modifier=Modifier.fillMaxSize().padding(pad).padding(horizontal=AppSpace.Page), contentPadding=PaddingValues(top=AppSpace.XLarge,bottom=88.dp), verticalArrangement=Arrangement.spacedBy(AppSpace.Large)) {
+     LazyColumn(state=listState,modifier=Modifier.fillMaxSize().padding(pad).padding(horizontal=AppSpace.Page), contentPadding=PaddingValues(top=if(screen==5) AppSpace.Small else AppSpace.XLarge,bottom=AppSpace.XLarge), verticalArrangement=Arrangement.spacedBy(AppSpace.Large)) {
       if(editor) {
        item { TaskEditor(targetDay, db, onCancel={ editor=false }, onSave={ editor=false; refresh++ }) }
       } else when(screen) {
@@ -128,7 +127,7 @@ class MainActivity : ComponentActivity() {
          val video=db.rewardSnapshot("video");val games=db.rewardSnapshot("game")
          Text(if(!protected) "应用保护未开启" else if(c.emergency) "今天已紧急解锁" else if(video.remaining>0) "保护已开启 · 额度可用" else if(tasks.any{it.required && !it.done && it.rewardMinutes>0}) "完成一项有视频奖励的必做任务即可增加额度" else if(tasks.any{it.required && it.done}) "视频额度已用完" else "暂无可用视频额度",color=if(video.remaining>0 && protected && !c.emergency) AppColors.Accent else AppColors.Muted,style=MaterialTheme.typography.labelMedium)
          Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
-          Column(verticalArrangement=Arrangement.spacedBy(2.dp)) { Text("${video.remaining / 60000}",fontSize=38.sp,fontWeight=FontWeight.Light,lineHeight=42.sp); Text("剩余分钟",color=AppColors.Muted,style=MaterialTheme.typography.bodySmall) }
+          Column(verticalArrangement=Arrangement.spacedBy(2.dp)) { Text("${video.remaining / 60000}",fontSize=38.sp,fontWeight=FontWeight.Light,lineHeight=42.sp,color=AppColors.Reward); Text("剩余分钟",color=AppColors.Muted,style=MaterialTheme.typography.bodySmall) }
           Column(horizontalAlignment=Alignment.End,verticalArrangement=Arrangement.spacedBy(2.dp)) { Text("${games.remaining}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Light); Text("剩余游戏局数",color=AppColors.Muted,style=MaterialTheme.typography.bodySmall) }
          }
          Hairline()
@@ -158,12 +157,17 @@ class MainActivity : ComponentActivity() {
        }
        4 -> { item { FocusScreen(db,focusTimer,tasks,onTasks={page=0},onChanged={refresh++}) } }
        5 -> {
-        item {TextButton(onClick={page=0}){Text("返回今日任务")};Header("本地保存 · 无需账号","设置")}
+        item {
+         Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.SpaceBetween) {
+          Text("设置",style=MaterialTheme.typography.headlineSmall)
+          TextButton(onClick={page=0}) { Text("返回今日任务") }
+         }
+        }
          item {CardBlock {Text(if(protected) "应用保护已开启" else "应用保护未开启");SecondaryAction("管理无障碍权限",{startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))});Text("后台受限时，请在系统设置允许向前运行",color=AppColors.Muted)}}
         item {DaySettings(db){refresh++}}
-        item {Header("作息目标 · 手动记录","睡眠规则")}
+        item {SectionHeading("睡眠规则")}
         item {SleepCard(db,refresh){refresh++}}
-        item {Header("计划管理","提前安排与笔记导入")}
+        item {SectionHeading("计划管理")}
         item {ImportEditor(db,today,refresh){refresh++}}
         item {FuturePlan(db,onAdd={targetDay=it;editor=true}){refresh++}}
         item {BackupView(db,{dataVersion++;refresh++},{focusTimer.resetAfterRestore()})}
@@ -193,7 +197,7 @@ class MainActivity : ComponentActivity() {
       onDismiss={taskDetailsId=null;editingTaskId=null}, onFocus={taskDetailsId=null;editingTaskId=null;page=4}, onChanged={refresh++},
       onAnalytics={taskDetailsId=null;editingTaskId=null;gritAnalyticsTaskId=detailTask.id;page=2},
       )
-     newAchievement?.let { achievement ->
+     newAchievement?.takeIf { taskDetailsId == null }?.let { achievement ->
       fun acknowledgeAchievement(openAll:Boolean) {
        db.setSetting("achievement_seen_${achievement.id}","true")
        newAchievement=null

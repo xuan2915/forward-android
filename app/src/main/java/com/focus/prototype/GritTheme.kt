@@ -22,30 +22,40 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
-import com.materialkolor.PaletteStyle
-import com.materialkolor.rememberDynamicColorScheme
 import androidx.compose.ui.platform.LocalContext
-enum class VisualDirection(val key: String, val title: String, val seed: Color) {
- Warm("warm", "暖陶与纸墨", Color(0xFFD19B7B)),
- Mineral("mineral", "雾蓝与石墨", Color(0xFF9EB4D1)),
- Grit("grit", "苔绿与墨色", Color(0xFFA5D395));
-
- companion object {
-  fun fromKey(key: String?): VisualDirection = entries.firstOrNull { it.key == key } ?: Warm
- }
-}
-
-@Composable fun GritTheme(direction: VisualDirection = VisualDirection.Warm, content:@Composable ()->Unit) {
- val context=LocalContext.current
- val colorScheme=rememberDynamicColorScheme(seedColor=direction.seed,isDark=true,isAmoled=false,style=PaletteStyle.TonalSpot)
- androidx.compose.runtime.SideEffect { (context as? android.app.Activity)?.window?.useDarkSystemBars() }
- AppColors.apply(colorScheme)
- val shapes = Shapes(
-  extraSmall = RoundedCornerShape(8.dp),
-  small = RoundedCornerShape(12.dp),
-  medium = RoundedCornerShape(16.dp),
-  large = RoundedCornerShape(22.dp),
-  extraLarge = RoundedCornerShape(28.dp),
- )
- MaterialTheme(colorScheme=colorScheme,typography=provideTypography(),shapes=shapes,content=content)
+@Composable
+fun GritTheme(content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val palette = darkColorScheme(
+        background = AppColors.Background, onBackground = AppColors.Text,
+        surface = AppColors.Surface, onSurface = AppColors.Text,
+        surfaceVariant = AppColors.Raised, onSurfaceVariant = AppColors.Muted,
+        surfaceDim = AppColors.Background, surfaceBright = AppColors.Raised,
+        surfaceContainerLowest = AppColors.Background, surfaceContainerLow = AppColors.Surface,
+        surfaceContainer = AppColors.Surface, surfaceContainerHigh = AppColors.Raised,
+        surfaceContainerHighest = AppColors.Raised,
+        primary = AppColors.Accent, onPrimary = AppColors.AccentInk,
+        primaryContainer = AppColors.AccentWash, onPrimaryContainer = AppColors.Text,
+        secondary = AppColors.Reward, onSecondary = AppColors.Background,
+        secondaryContainer = AppColors.Raised, onSecondaryContainer = AppColors.Text,
+        tertiary = AppColors.Warning, onTertiary = AppColors.Background,
+        tertiaryContainer = AppColors.Missed, onTertiaryContainer = AppColors.Text,
+        error = AppColors.Warning, onError = AppColors.Background,
+        errorContainer = AppColors.Missed, onErrorContainer = AppColors.Text,
+        outline = AppColors.Muted, outlineVariant = AppColors.Border,
+        inverseSurface = AppColors.Paper, inverseOnSurface = AppColors.PaperInk,
+        inversePrimary = AppColors.AccentWash, surfaceTint = AppColors.Accent,
+    )
+    androidx.compose.runtime.SideEffect {
+        (context as? android.app.Activity)?.window?.useDarkSystemBars()
+    }
+    MaterialTheme(
+        colorScheme = palette, typography = provideTypography(),
+        shapes = Shapes(
+            extraSmall = RoundedCornerShape(8.dp), small = RoundedCornerShape(12.dp),
+            medium = RoundedCornerShape(AppShape.Control), large = RoundedCornerShape(AppShape.Card),
+            extraLarge = RoundedCornerShape(AppShape.Panel),
+        ),
+        content = content,
+    )
 }

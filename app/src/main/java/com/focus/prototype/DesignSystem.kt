@@ -37,33 +37,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 object AppColors {
- var Background = darkColorScheme().background
- var Surface = darkColorScheme().surfaceContainer
- var Raised = darkColorScheme().surfaceContainerHigh
- var Border = darkColorScheme().outlineVariant
- var Text = darkColorScheme().onSurface
- var Muted = darkColorScheme().onSurfaceVariant
- var Quiet = darkColorScheme().onSurfaceVariant
- var Accent = darkColorScheme().primary
- var AccentInk = darkColorScheme().onPrimary
- var AccentWash = darkColorScheme().primaryContainer
- var Warning = darkColorScheme().error
- // Calendar misses use a low-saturation rose so they read as history, not an alert.
- val Missed = Color(0xFF49373B)
- val MissedInk = Color(0xFFC69A9F)
- fun apply(s:androidx.compose.material3.ColorScheme) {
-Background=s.background
-Surface=s.surfaceContainer
-Raised=s.surfaceContainerHigh
-Border=s.outlineVariant
-Text=s.onSurface
-Muted=s.onSurfaceVariant
-Quiet=s.onSurfaceVariant
-Accent=s.primary
-AccentInk=s.onPrimary
-AccentWash=s.primaryContainer
-Warning=s.error
- }
+    val Background = Color(0xFF13171C)
+    val Surface = Color(0xFF1F252C)
+    val Raised = Color(0xFF2A323A)
+    val Text = Color(0xFFF4F1EB)
+    val Muted = Color(0xFFA9B1B9)
+    val Quiet = Muted
+    val Border = Color(0xFF454E57)
+    val Accent = Color(0xFF8EADA8)
+    val AccentInk = Background
+    val AccentWash = Color(0xFF293B3C)
+    val Reward = Color(0xFFD5AB80)
+    val Warning = Color(0xFFC88978)
+    val Missed = Color(0xFF49373B)
+    val MissedInk = Warning
+    val Paper = Color(0xFFF2EBDD)
+    val PaperInk = Color(0xFF292520)
+    val PaperMuted = Color(0xFF61574B)
+    val PaperRule = Color(0xFFC6BAA7)
 }
 
 object AppSpace {
@@ -92,8 +83,8 @@ object AppMotion {
 }
 
 @Composable
-fun FocusTheme(direction: VisualDirection = VisualDirection.Warm, content: @Composable () -> Unit) {
-    GritTheme(direction, content)
+fun FocusTheme(content: @Composable () -> Unit) {
+    GritTheme(content)
 }
 
 @Composable
