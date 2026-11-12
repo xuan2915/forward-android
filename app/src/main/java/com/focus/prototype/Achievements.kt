@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import java.time.LocalDate
+import kotlinx.coroutines.launch
 
 internal data class Achievement(
     val id: String,
@@ -211,152 +212,39 @@ private fun AchievementCard(item: Achievement, onClick: () -> Unit) {
 
 @Composable
 private fun AchievementMedal(item: Achievement, modifier: Modifier = Modifier, size: Dp = 66.dp) {
-    val medalMetal = when (item.category) {
-        "连续记录" -> AppColors.Warning
-        "专注积累" -> AppColors.Accent
+    val resource = when (item.id) {
+        "task.first" -> R.drawable.achievement_first
+        "task.ten" -> R.drawable.achievement_ten
+        "task.fifty" -> R.drawable.achievement_fifty
+        "streak.three" -> R.drawable.achievement_three
+        "streak.seven" -> R.drawable.achievement_seven
+        "streak.thirty" -> R.drawable.achievement_thirty
+        "focus.hour" -> R.drawable.achievement_hour
+        "focus.ten_hours" -> R.drawable.achievement_ten_hours
+        else -> return
+    }
+    val accent = when (item.id.substringBefore('.')) {
+        "streak" -> AppColors.Warning
+        "focus" -> AppColors.Accent
         else -> AppColors.Reward
     }
-    val tint by animateColorAsState(
-        targetValue = when {
-            item.earned -> medalMetal
-            item.started -> medalMetal.copy(alpha = 0.66f)
-            else -> AppColors.Muted.copy(alpha = 0.42f)
-        },
-        label = "medal-color-${item.id}",
-    )
-    val progress by animateFloatAsState((item.progress.toFloat() / item.target).coerceIn(0f, 1f), label = "medal-progress-${item.id}")
-    val stateLabel = when { item.earned -> "已获得"; item.started -> "进行中"; else -> "未解锁" }
-    Canvas(
-        modifier.size(size).semantics { contentDescription = "${item.title}勋章，$stateLabel" },
+    val tint = when {
+        item.earned -> accent
+        item.started -> accent.copy(alpha = .74f)
+        else -> AppColors.Muted.copy(alpha = .55f)
+    }
+    Surface(
+        modifier.size(size), shape = RoundedCornerShape(size * .25f),
+        color = tint.copy(alpha = .09f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, tint.copy(alpha = .36f)),
     ) {
-        val w = this.size.width
-        val h = this.size.height
-        val cx = w / 2f
-        val cy = h / 2f
-        val min = this.size.minDimension
-        val color = tint
-        val radius = min * .40f
-        val body = Path().apply {
-            when (item.category) {
-                "任务积累" -> {
-                    val corner = radius * .32f
-                    moveTo(cx - radius + corner, cy - radius)
-                    lineTo(cx + radius, cy - radius)
-                    lineTo(cx + radius, cy + radius - corner)
-                    lineTo(cx + radius - corner, cy + radius)
-                    lineTo(cx - radius, cy + radius)
-                    lineTo(cx - radius, cy - radius + corner)
-                    close()
-                }
-                "连续记录" -> {
-                    moveTo(cx - radius, cy - radius)
-                    lineTo(cx + radius, cy - radius)
-                    lineTo(cx + radius, cy + radius * .1f)
-                    quadraticTo(cx + radius, cy + radius * .62f, cx, cy + radius)
-                    quadraticTo(cx - radius, cy + radius * .62f, cx - radius, cy + radius * .1f)
-                    close()
-                }
-                else -> addOval(androidx.compose.ui.geometry.Rect(cx-radius, cy-radius, cx+radius, cy+radius))
-            }
-        }
-        drawPath(body, AppColors.Background)
-        drawPath(body, color.copy(alpha = if (item.earned) .19f else .07f))
-        drawPath(body, color, style = Stroke(min * .026f))
-        if (item.earned) {
-            val edgeY = cy - radius * .72f
-            drawLine(color.copy(alpha = .65f), Offset(cx-radius*.29f, edgeY),
-                Offset(cx+radius*.29f, edgeY), min*.013f, cap = StrokeCap.Round)
-        } else if (item.started) {
-            drawLine(color, Offset(cx-radius*.6f, cy+radius*.70f),
-                Offset(cx-radius*.6f+radius*1.2f*progress, cy+radius*.70f), min*.018f, cap = StrokeCap.Round)
-        }
-        when (item.id) {
-            "task.first" -> drawCheckMedal(cx, cy - min * .025f, min, color)
-            "task.ten" -> drawListMedal(cx, cy - min * .03f, min, color)
-            "task.fifty" -> drawLaurelMedal(cx, cy - min * .02f, min, color)
-            "streak.three" -> drawFlameMedal(cx, cy - min * .02f, min, color)
-            "streak.seven" -> drawCalendarFlameMedal(cx, cy - min * .02f, min, color)
-            "streak.thirty" -> drawStarMedal(cx, cy - min * .02f, min, color)
-            "focus.hour" -> drawClockMedal(cx, cy - min * .02f, min, color)
-            else -> drawHourglassMedal(cx, cy - min * .02f, min, color)
+        Box(contentAlignment = Alignment.Center) {
+            androidx.compose.material3.Icon(
+                androidx.compose.ui.res.painterResource(resource), item.title,
+                Modifier.size(size * .60f), tint = tint,
+            )
         }
     }
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCheckMedal(cx: Float, cy: Float, d: Float, c: Color) {
-    val path = Path().apply { moveTo(cx - d * .16f, cy); lineTo(cx - d * .04f, cy + d * .12f); lineTo(cx + d * .19f, cy - d * .15f) }
-    drawPath(path, c, style = Stroke(d * .075f, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawListMedal(cx: Float, cy: Float, d: Float, c: Color) {
-    for (i in 0..2) {
-        val y = cy + (i - 1) * d * .14f
-        drawCircle(c, d * .027f, Offset(cx - d * .15f, y))
-        drawLine(c, Offset(cx - d * .06f, y), Offset(cx + d * .16f, y), d * .045f, cap = StrokeCap.Round)
-    }
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawLaurelMedal(cx: Float, cy: Float, d: Float, c: Color) {
-    val star = starPath(cx, cy, d * .17f, d * .075f)
-    drawPath(star, c)
-    for (side in listOf(-1f, 1f)) for (i in 0..2) {
-        val x = cx + side * d * (.22f - i * .035f)
-        val y = cy + d * (i - 1) * .105f
-        drawOval(c, topLeft = Offset(x - d * .035f, y - d * .055f), size = androidx.compose.ui.geometry.Size(d * .07f, d * .11f))
-    }
-    drawArc(c, 205f, 130f, false, topLeft = Offset(cx - d * .28f, cy - d * .16f), size = androidx.compose.ui.geometry.Size(d * .56f, d * .34f), style = Stroke(d * .025f))
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawFlameMedal(cx: Float, cy: Float, d: Float, c: Color) {
-    val flame = Path().apply {
-        moveTo(cx, cy + d * .22f); cubicTo(cx - d * .21f, cy + d * .08f, cx - d * .04f, cy - d * .04f, cx - d * .08f, cy - d * .23f)
-        cubicTo(cx + d * .18f, cy - d * .12f, cx + d * .18f, cy + d * .02f, cx + d * .12f, cy + d * .08f)
-        cubicTo(cx + d * .22f, cy + d * .04f, cx + d * .23f, cy + d * .18f, cx, cy + d * .22f)
-        close()
-    }
-    drawPath(flame, c)
-    drawCircle(AppColors.AccentInk.copy(alpha = .8f), d * .055f, Offset(cx, cy + d * .10f))
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCalendarFlameMedal(cx: Float, cy: Float, d: Float, c: Color) {
-    val left = cx - d * .22f; val top = cy - d * .17f; val width = d * .44f; val height = d * .34f
-    drawRoundRect(c, Offset(left, top), androidx.compose.ui.geometry.Size(width, height), androidx.compose.ui.geometry.CornerRadius(d * .045f), style = Stroke(d * .045f))
-    drawLine(c, Offset(left, top + d * .09f), Offset(left + width, top + d * .09f), d * .035f)
-    drawLine(c, Offset(cx - d * .11f, top - d * .035f), Offset(cx - d * .11f, top + d * .035f), d * .045f, cap = StrokeCap.Round)
-    drawLine(c, Offset(cx + d * .11f, top - d * .035f), Offset(cx + d * .11f, top + d * .035f), d * .045f, cap = StrokeCap.Round)
-    drawCircle(c, d * .035f, Offset(cx - d * .10f, cy + d * .02f)); drawCircle(c, d * .035f, Offset(cx + d * .10f, cy + d * .02f))
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStarMedal(cx: Float, cy: Float, d: Float, c: Color) {
-    drawPath(starPath(cx, cy, d * .23f, d * .105f), c)
-    drawCircle(AppColors.AccentInk.copy(alpha = .8f), d * .045f, Offset(cx, cy))
-}
-
-private fun starPath(cx: Float, cy: Float, outer: Float, inner: Float): Path = Path().apply {
-    for (index in 0 until 10) {
-        val angle = Math.toRadians(-90.0 + index * 36.0)
-        val radius = if (index % 2 == 0) outer else inner
-        val x = cx + kotlin.math.cos(angle).toFloat() * radius
-        val y = cy + kotlin.math.sin(angle).toFloat() * radius
-        if (index == 0) moveTo(x, y) else lineTo(x, y)
-    }
-    close()
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawClockMedal(cx: Float, cy: Float, d: Float, c: Color) {
-    drawCircle(c, d * .205f, Offset(cx, cy), style = Stroke(d * .045f))
-    drawLine(c, Offset(cx, cy), Offset(cx, cy - d * .12f), d * .045f, cap = StrokeCap.Round)
-    drawLine(c, Offset(cx, cy), Offset(cx + d * .12f, cy + d * .06f), d * .045f, cap = StrokeCap.Round)
-    drawCircle(c, d * .035f, Offset(cx, cy))
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawHourglassMedal(cx: Float, cy: Float, d: Float, c: Color) {
-    val p = Path().apply {
-        moveTo(cx - d * .17f, cy - d * .2f); lineTo(cx + d * .17f, cy - d * .2f); lineTo(cx + d * .04f, cy - d * .02f)
-        lineTo(cx + d * .17f, cy + d * .18f); lineTo(cx - d * .17f, cy + d * .18f); lineTo(cx - d * .04f, cy - d * .02f); close()
-    }
-    drawPath(p, c, style = Stroke(d * .04f, join = androidx.compose.ui.graphics.StrokeJoin.Round))
-    drawLine(c, Offset(cx - d * .08f, cy + d * .12f), Offset(cx + d * .08f, cy + d * .12f), d * .035f, cap = StrokeCap.Round)
 }
 
 @Composable
@@ -390,8 +278,10 @@ internal fun AchievementUnlockDialog(item: Achievement, onDismiss: () -> Unit, o
             card.snapTo(1f)
             seal.snapTo(1f)
         } else {
-            card.animateTo(1f, tween(200, easing = AppMotion.Ease))
-            seal.animateTo(1f, tween(330, easing = AppMotion.Ease))
+            kotlinx.coroutines.coroutineScope {
+                launch { card.animateTo(1f, tween(210, easing = AppMotion.Ease)) }
+                launch { seal.animateTo(1f, tween(280, delayMillis = 85, easing = AppMotion.Ease)) }
+            }
             haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
         }
     }

@@ -1,29 +1,22 @@
 package com.focus.prototype
 
-import androidx.compose.animation.AnimatedContent
+import android.os.SystemClock
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -37,14 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -65,6 +51,7 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
     val mode = timer.mode
     val remaining = timer.remaining()
     val elapsed = timer.elapsed()
+    val sampledAt = SystemClock.elapsedRealtime()
     var chooseTask by remember { mutableStateOf(false) }
     val pausedFrom = db.setting("focus_paused_phase")
     val freeMode = mode == FocusMode.FREE
@@ -76,17 +63,14 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
         phase == "ready" -> formatFocusTime(mode.workMillis)
         else -> formatFocusTime(remaining)
     }
-    val fraction = when {
-        phase == "ready" -> 0f
-        freeMode -> 1f - kotlin.math.abs(1f - (elapsed % 120_000L) / 60_000f)
-        isRest -> 1f - remaining.toFloat() / mode.breakMillis.coerceAtLeast(1L)
-        else -> 1f - remaining.toFloat() / mode.workMillis.coerceAtLeast(1L)
-    }.coerceIn(0f, 1f)
-    val animatedFraction by animateFloatAsState(
-        fraction,
-        tween(motionMillis(850), easing = androidx.compose.animation.core.LinearEasing),
-        label = "focus-vessel",
-    )
+    val freeSand = freeMode && !isRest
+    val sandDuration = if (isRest) mode.breakMillis else mode.workMillis
+    val sandElapsed = when {
+        phase == "ready" -> 0L
+        freeSand -> elapsed
+        else -> (sandDuration - remaining).coerceAtLeast(0L)
+    }
+    val sand = SandClock(sandElapsed, sandDuration, sampledAt)
     val phaseColor by animateColorAsState(
         targetValue = if (isRest) MaterialTheme.colorScheme.secondary else AppColors.Accent,
         animationSpec = tween(motionMillis(420), easing = AppMotion.Ease),
@@ -138,13 +122,13 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
         FocusTimerStage(
             time = time,
             phase = phase,
-            fraction = animatedFraction,
-            free = freeMode,
+            sand = sand,
+            free = freeSand,
             rest = isRest,
             tint = phaseColor,
             duration = when {
-                freeMode -> "自由计时"
                 isRest -> "本次休息"
+                freeMode -> "自由计时"
                 else -> mode.durationLabel()
             },
         )
@@ -219,7 +203,7 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
 }
 
 @Composable
-private fun FocusTimerStage(time: String, phase: String, fraction: Float, free: Boolean, rest: Boolean, tint: Color, duration: String) {
+private fun FocusTimerStage(time: String, phase: String, sand: SandClock, free: Boolean, rest: Boolean, tint: Color, duration: String) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
@@ -243,60 +227,25 @@ private fun FocusTimerStage(time: String, phase: String, fraction: Float, free: 
                     maxLines = 1, softWrap = false,
                 )
             }
-            FocusVessel(fraction, free, tint)
+            FocusHourglass(
+                clock = sand,
+                running = phase == "work" || phase == "break",
+                settling = phase == "paused",
+                free = free,
+                rest = rest,
+                tint = tint,
+            )
+            val percent = (sand.progressAt(sand.sampledAt, running = false) * 100).toInt()
             Text(
                 when {
                     phase == "paused" -> "已暂停"
                     free -> "自由计时"
-                    rest -> "休息进度 ${(fraction * 100).toInt()}%"
-                    else -> "本轮进度 ${(fraction * 100).toInt()}%"
+                    rest -> "休息进度 ${percent}%"
+                    else -> "本轮进度 ${percent}%"
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = AppColors.Muted,
             )
-        }
-    }
-}
-
-@Composable
-private fun FocusVessel(fraction: Float, free: Boolean, tint: Color) {
-    Canvas(Modifier.size(width = 90.dp, height = 104.dp)) {
-        val x = size.width
-        val y = size.height
-        val outline = Path().apply {
-            moveTo(.16f * x, .09f * y)
-            lineTo(.84f * x, .09f * y)
-            cubicTo(.84f*x, .32f*y, .66f*x, .37f*y, .54f*x, .48f*y)
-            cubicTo(.50f*x, .52f*y, .84f*x, .63f*y, .84f*x, .91f*y)
-            lineTo(.16f * x, .91f * y)
-            cubicTo(.16f*x, .63f*y, .50f*x, .52f*y, .46f*x, .48f*y)
-            cubicTo(.34f*x, .37f*y, .16f*x, .32f*y, .16f*x, .09f*y)
-            close()
-        }
-        drawPath(outline, AppColors.Background)
-        clipPath(outline) {
-            val bottom = y * (.91f - .37f * fraction)
-            val top = y * (.13f + .36f * fraction)
-            if (!free) drawRect(tint.copy(alpha = .55f), Offset(0f, top), Size(x, (y * .49f - top).coerceAtLeast(0f)))
-            if (fraction > 0f) {
-                val sand = Path().apply {
-                    moveTo(0f, bottom + y * .05f)
-                    quadraticTo(x * .46f, bottom - y * .05f, x, bottom + y * .035f)
-                    lineTo(x, y)
-                    lineTo(0f, y)
-                    close()
-                }
-                drawPath(sand, tint)
-                for (grain in 0..5) {
-                    val grainY = y * (.51f + (grain * .068f + fraction * 2f) % .35f)
-                    if (grainY < bottom) drawCircle(tint.copy(alpha = .55f), 1.dp.toPx(), Offset(x * .50f, grainY))
-                }
-            }
-        }
-        drawPath(outline, AppColors.Muted.copy(alpha = .58f), style = Stroke(1.15.dp.toPx()))
-        for (edge in listOf(.055f, .915f)) {
-            drawRoundRect(AppColors.Border, Offset(x * .10f, y * edge),
-                Size(x * .80f, y * .03f), CornerRadius(2.dp.toPx()))
         }
     }
 }

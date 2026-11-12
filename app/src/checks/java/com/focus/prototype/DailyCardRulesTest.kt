@@ -5,6 +5,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DailyCardRulesTest {
+    @Test fun editionsUseStableKeysAndRouteLongQuotesToPaper() {
+        assertTrue(CardEdition.fromKey("sky-meadow-v1") == CardEdition.Sky)
+        assertTrue(CardEdition.fromKey("") == CardEdition.Legacy)
+        assertTrue(cardEdition("长".repeat(42), 3) == CardEdition.Paper)
+        assertTrue(cardEdition("短句", 3) == CardEdition.Sky)
+    }
+
+    @Test fun catalogHasDistinctIdsAndSourceMetadata() {
+        val entries = DailyExcerpts.entries
+        assertTrue(entries.size in 15..20)
+        assertTrue(entries.map { it.id }.distinct().size == entries.size)
+        assertTrue(entries.all { it.original.isNotBlank() && it.chinese.isNotBlank() &&
+            it.author.isNotBlank() && it.work.isNotBlank() && it.source.startsWith("https://") &&
+            it.themes.isNotEmpty() })
+    }
     @Test fun emptyDayDoesNotCreateCard() {
         assertFalse(dailyCardQualifies(emptyList()))
     }
