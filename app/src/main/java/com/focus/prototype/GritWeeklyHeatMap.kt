@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -52,13 +53,13 @@ fun GritWeeklyHeatMap(today: LocalDate, history: Map<String, String>, onDateSele
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                listOf("一", "二", "三", "四", "五", "六", "日").forEachIndexed { index, label ->
+                listOf("一", "二", "三", "四", "五", "六", "日").forEach { label ->
                     Text(
                         label,
-                        Modifier.width(26.dp).height(35.dp),
+                        Modifier.width(26.dp).height(31.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -68,10 +69,10 @@ fun GritWeeklyHeatMap(today: LocalDate, history: Map<String, String>, onDateSele
             LazyRow(
                 state = state,
                 modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(1.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 items(weeks) { week ->
-                    Column(Modifier.width(36.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Column(Modifier.width(30.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         val monthStart = week.dates.firstOrNull { it.dayOfMonth == 1 }
                         Text(
                             monthStart?.let { "${it.monthValue}月" }.orEmpty(),
@@ -83,23 +84,15 @@ fun GritWeeklyHeatMap(today: LocalDate, history: Map<String, String>, onDateSele
                         )
                         week.dates.forEach { date ->
                             val status = history[date.toString()]
-                            val previous = history[date.minusDays(1).toString()] == "完成"
-                            val next = history[date.plusDays(1).toString()] == "完成"
-                            val position = when {
-                                previous && next -> StreakPosition.MIDDLE
-                                previous -> StreakPosition.END
-                                next -> StreakPosition.START
-                                else -> StreakPosition.ISOLATED
-                            }
                             val color = when (status) {
                                 "完成" -> AppColors.Accent
                                 "休息" -> AppColors.Border
                                 "未完成" -> AppColors.Missed
-                                else -> MaterialTheme.colorScheme.surface
+                                else -> MaterialTheme.colorScheme.surfaceContainerHigh
                             }
                             Box(
-                                Modifier.size(35.dp)
-                                    .clip(if (position == StreakPosition.ISOLATED) RoundedCornerShape(20.dp) else gritHeatMapStreakShape(position, date.dayOfWeek.value == 1, date.dayOfWeek.value == 7))
+                                Modifier.size(28.dp)
+                                    .clip(CircleShape)
                                     .background(color)
                                     .clickable(enabled = status != null && date <= today) { onDateSelected(date) },
                                 contentAlignment = Alignment.Center,

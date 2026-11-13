@@ -16,6 +16,7 @@ package com.focus.prototype
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -24,6 +25,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -56,7 +58,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -77,11 +78,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -141,9 +142,6 @@ internal fun GritTaskListPage(
             ) {
                 FilledTonalIconButton(onClick = onSettings) {
                     Icon(painterResource(R.drawable.grit_settings), contentDescription = "设置")
-                }
-                FilledIconButton(onClick = onAdd) {
-                    Icon(painterResource(R.drawable.grit_add), contentDescription = "添加任务")
                 }
             }
             Spacer(Modifier.height(8.dp))
@@ -246,6 +244,19 @@ private fun GritTaskListCard(
     onDelete: (Task) -> Unit,
 ) {
     var menuExpanded by remember(task.id) { mutableStateOf(false) }
+    var wasDone by remember(task.id) { mutableStateOf(task.done) }
+    val strikeProgress = remember(task.id) { Animatable(if (task.done) 1f else 0f) }
+    LaunchedEffect(task.done) {
+        val changed = wasDone != task.done
+        wasDone = task.done
+        if (changed) {
+            if (task.done) strikeProgress.snapTo(0f)
+            strikeProgress.animateTo(
+                if (task.done) 1f else 0f,
+                animationSpec = tween(380, easing = AppMotion.Ease),
+            )
+        }
+    }
     val cardContent by animateColorAsState(
         if (task.done) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSecondaryContainer,
         label = "grit-card-content",
@@ -253,6 +264,22 @@ private fun GritTaskListCard(
     val cardBackground by animateColorAsState(
         if (task.done) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.secondaryContainer,
         label = "grit-card-background",
+    )
+    val titleColor by animateColorAsState(
+        if (task.done) AppColors.Muted.copy(alpha = .78f) else cardContent,
+        animationSpec = tween(260),
+        label = "grit-task-title-color",
+    )
+    val titleSize by animateFloatAsState(
+        if (task.done) 20f else 18f,
+        animationSpec = tween(260, easing = AppMotion.Ease),
+        label = "grit-task-title-size",
+    )
+    val metadataColor by animateColorAsState(
+        if (task.done) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .64f)
+        else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(260),
+        label = "grit-task-metadata-color",
     )
     Card(
         modifier = Modifier
@@ -305,13 +332,41 @@ private fun GritTaskListCard(
                 Modifier.weight(1f).padding(vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                Text(
-                    task.title,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
-                    textDecoration = if (task.done) TextDecoration.LineThrough else TextDecoration.None,
-                )
+                var titleLineRight by remember(task.id) { mutableStateOf(0f) }
+                var titleLineCenter by remember(task.id) { mutableStateOf(0f) }
+                Box(Modifier.fillMaxWidth()) {
+                    Text(
+                        task.title,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontSize = titleSize.sp,
+                            fontFamily = gritFontRounded(),
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        color = titleColor,
+                        onTextLayout = { layout ->
+                            if (layout.lineCount > 0) {
+                                titleLineRight = layout.getLineRight(0)
+                                titleLineCenter = (layout.getLineTop(0) + layout.getLineBottom(0)) / 2f
+                            }
+                        },
+                    )
+                    if (task.done && strikeProgress.value > 0f) {
+                        Canvas(Modifier.matchParentSize()) {
+                            val endX = (titleLineRight * strikeProgress.value).coerceIn(0f, size.width)
+                            if (endX > 0f) {
+                                drawLine(
+                                    color = titleColor.copy(alpha = minOf(titleColor.alpha + .12f, 1f)),
+                                    start = Offset(0f, titleLineCenter),
+                                    end = Offset(endX, titleLineCenter),
+                                    strokeWidth = 1.7.dp.toPx(),
+                                    cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                                )
+                            }
+                        }
+                    }
+                }
                 val target = if (task.minutes > 0) "${task.minutes} 分钟" else "自由专注"
                 val reward = buildList {
                     if (task.rewardMinutes > 0) add("+${task.rewardMinutes} 分钟")
@@ -325,7 +380,7 @@ private fun GritTaskListCard(
                         if (reward.isNotEmpty()) append(" · 完成可得 $reward")
                     },
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = metadataColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -522,24 +577,27 @@ private fun GritHabitCalendarDay(day: CalendarDay, today: LocalDate, selected: L
         else -> MaterialTheme.colorScheme.surfaceContainer
     }
     Box(
-        Modifier.fillMaxWidth().aspectRatio(1f).padding(3.dp).clip(CircleShape)
-            .background(if (inside) fill else Color.Transparent)
+        Modifier.fillMaxWidth().aspectRatio(1f).padding(3.dp)
             .then(if (inside) Modifier.clickable { onClick(day.date) } else Modifier),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            day.date.dayOfMonth.toString(),
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = gritFontRounded()),
-            color = when {
-                !inside -> Color.Transparent
-                state == "完成" -> MaterialTheme.colorScheme.onPrimary
-                state == "未完成" -> AppColors.MissedInk
-                state == "休息" -> AppColors.Muted
-                else -> MaterialTheme.colorScheme.onSurface
-            },
-        )
-        if (inside && (day.date == selected || day.date == today)) {
-            Box(Modifier.fillMaxSize().padding(2.dp).border(2.dp, MaterialTheme.colorScheme.primary, CircleShape))
+        if (inside) {
+            Box(
+                Modifier.fillMaxSize().clip(CircleShape).background(fill)
+                    .then(if (day.date == selected || day.date == today) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape) else Modifier),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    day.date.dayOfMonth.toString(),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = gritFontRounded()),
+                    color = when {
+                        state == "完成" -> MaterialTheme.colorScheme.onPrimary
+                        state == "未完成" -> AppColors.MissedInk
+                        state == "休息" -> AppColors.Muted
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
+                )
+            }
         }
     }
 }

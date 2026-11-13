@@ -49,8 +49,9 @@ object AppColors {
     val AccentWash = Color(0xFF293B3C)
     val Reward = Color(0xFFD5AB80)
     val Warning = Color(0xFFC88978)
-    val Missed = Color(0xFF49373B)
-    val MissedInk = Warning
+    // Quiet slate keeps missed days distinct from completion mint without a red/green clash.
+    val Missed = Color(0xFF3C4349)
+    val MissedInk = Color(0xFFB4B6B4)
     val Paper = Color(0xFFF2EBDD)
     val PaperInk = Color(0xFF292520)
     val PaperMuted = Color(0xFF61574B)
