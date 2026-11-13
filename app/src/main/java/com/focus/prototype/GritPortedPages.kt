@@ -161,7 +161,7 @@ internal fun GritTaskListPage(
                     style = MaterialTheme.typography.titleMedium.copy(fontFamily = gritFontRounded()),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onClick = onPlan) { Text(if (confirmed) "今日计划" else "确认计划") }
+                TextButton(onClick = onPlan) { Text("计划管理") }
             }
         }
 

@@ -44,10 +44,24 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
  private var refresh by mutableIntStateOf(0)
  private var shareVersion by mutableIntStateOf(0)
- private fun receiveText(intent: Intent) { if(intent.action == Intent.ACTION_SEND && intent.type == "text/plain") { val text=intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty(); if(text.isNotBlank()) Database(this).use { it.setSetting("import_draft",text) };intent.action=Intent.ACTION_MAIN;intent.removeExtra(Intent.EXTRA_TEXT) } }
- override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); receiveText(intent); shareVersion++; refresh++ }
+ private fun receiveText(intent: Intent): Boolean {
+  if(intent.action != Intent.ACTION_SEND || intent.type != "text/plain") return false
+  val text=intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty()
+  if(text.isNotBlank()) Database(this).use { it.setSetting("import_draft",text) }
+  intent.action=Intent.ACTION_MAIN
+  intent.removeExtra(Intent.EXTRA_TEXT)
+  return text.isNotBlank()
+ }
+ override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); if(receiveText(intent)) shareVersion++; refresh++ }
  override fun onResume() { super.onResume(); refresh++ }
  override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState)
+  val initialNavigation = resolveInitialNavigation(
+   action = intent.action,
+   mimeType = intent.type,
+   hasSharedText = !intent.getCharSequenceExtra(Intent.EXTRA_TEXT).isNullOrBlank(),
+   debugPage = intent.getIntExtra("debug_page", 0).takeIf { intent.hasExtra("debug_page") },
+   debugBuild = BuildConfig.DEBUG,
+  )
   window.useDarkSystemBars()
   receiveText(intent)
   val db = Database(this); val store = Store(this)
@@ -56,12 +70,12 @@ class MainActivity : ComponentActivity() {
   val launch = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
   val apps = packageManager.queryIntentActivities(launch,0).filter { store.canRestrict(it.activityInfo.packageName) }.distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(packageManager).toString() }
   setContent {
-    val debugPage = if (BuildConfig.DEBUG) intent.getIntExtra("debug_page",0) else 0
-    var page by remember { mutableIntStateOf(if(db.setting("import_draft").isNotBlank()) 5 else debugPage.coerceIn(0,5)) }; var editor by remember { mutableStateOf(false) };var dataVersion by remember {mutableIntStateOf(0)};var showAllRewardHistory by remember {mutableStateOf(false)};var rewardControlsExpanded by remember {mutableStateOf(false)};var selectedRewardRecord by remember { mutableStateOf<String?>(null) };var taskFilter by remember { mutableIntStateOf(0) }
-    var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }; var editingTaskId by remember { mutableStateOf<String?>(null) };var movingTask by remember { mutableStateOf<Task?>(null) };var deletingTask by remember { mutableStateOf<Task?>(null) };var allAchievements by remember { mutableStateOf(false) }; var newAchievement by remember { mutableStateOf(nextUnseenAchievement(db)) }; var gritAnalyticsTaskId by remember { mutableStateOf<String?>(null) }; var showContractDialog by remember { mutableStateOf(false) }; var dailyCardDate by remember { mutableStateOf<String?>(null) }; var dailyCardOpenDate by remember { mutableStateOf<String?>(null) }
+    // Keep navigation alive while this Activity is backgrounded; a fresh Activity follows its launch intent.
+    var page by remember { mutableIntStateOf(initialNavigation.page) }; var planManagement by remember { mutableStateOf(initialNavigation.openPlanManagement) }; var planSection by remember { mutableStateOf<String?>(if(initialNavigation.openPlanManagement) "import" else null) }; var settingsSection by remember { mutableStateOf<String?>(null) }; var editor by remember { mutableStateOf(false) };var showAllRewardHistory by remember { mutableStateOf(false) };var rewardControlsExpanded by remember { mutableStateOf(false) };var selectedRewardRecord by remember { mutableStateOf<String?>(null) };var taskFilter by remember { mutableIntStateOf(0) }
+    var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }; var editingTaskId by remember { mutableStateOf<String?>(null) };var movingTask by remember { mutableStateOf<Task?>(null) };var deletingTask by remember { mutableStateOf<Task?>(null) };var allAchievements by remember { mutableStateOf(false) }; var newAchievement by remember { mutableStateOf(nextUnseenAchievement(db)) }; var gritAnalyticsTaskId by remember { mutableStateOf<String?>(null) }; var dailyCardDate by remember { mutableStateOf<String?>(null) }; var dailyCardOpenDate by remember { mutableStateOf<String?>(null) }
     val taskActionScope = rememberCoroutineScope()
     fun dismissTaskActions() { movingTask=null; deletingTask=null }
-   LaunchedEffect(shareVersion) { if(shareVersion>0) { page=5;editor=false } }
+   LaunchedEffect(shareVersion) { if(shareVersion>0) { page=0;planManagement=true;planSection="import";settingsSection=null;editor=false } }
    LaunchedEffect(Unit) { while(true) { db.settleToday();focusTimer.advance();if(now%10L==0L)db.checkpoint();now++; delay(1000) } }
    val tick = now + refresh; val today = db.day(); val c = remember(today,tick) { db.contract(today) }; val tasks = remember(today,refresh) { db.tasks(today) }; val continuing = remember(today,refresh) { db.runningTasks().filter { it.date != today } }
    var dailyCardRecords by remember { mutableStateOf(emptyList<DailyCardRecord>()) }
@@ -73,20 +87,20 @@ class MainActivity : ComponentActivity() {
    val protected = remember(tick) { val id = ComponentName(this,FocusService::class.java).flattenToString(); FocusService.connected && Settings.Secure.getString(contentResolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)?.split(':')?.any { it.equals(id,true) } == true }
    LaunchedEffect(refresh) { if (newAchievement == null) newAchievement = nextUnseenAchievement(db) }
    FocusTheme { MotionHost(db.xp(),showToast=page!=2 && taskDetailsId==null && newAchievement==null && dailyCardOpenDate==null && dailyCardDate==null) {
-       androidx.activity.compose.BackHandler(enabled=allAchievements || gritAnalyticsTaskId!=null || page==5 || editor || showContractDialog || dailyCardOpenDate!=null || dailyCardDate!=null) {
-        when { dailyCardOpenDate!=null -> {DailyCards.markRevealSeen(db,dailyCardOpenDate!!);dailyCardOpenDate=null;refresh++}; dailyCardDate!=null -> dailyCardDate=null; showContractDialog -> showContractDialog=false; allAchievements -> allAchievements=false; gritAnalyticsTaskId!=null -> gritAnalyticsTaskId=null; editor -> editor=false; else -> page=0 }
+       androidx.activity.compose.BackHandler(enabled=allAchievements || gritAnalyticsTaskId!=null || settingsSection!=null || planManagement || page==5 || editor || dailyCardOpenDate!=null || dailyCardDate!=null) {
+        when { dailyCardOpenDate!=null -> {DailyCards.markRevealSeen(db,dailyCardOpenDate!!);dailyCardOpenDate=null;refresh++}; dailyCardDate!=null -> dailyCardDate=null; allAchievements -> allAchievements=false; gritAnalyticsTaskId!=null -> gritAnalyticsTaskId=null; editor -> editor=false; settingsSection!=null -> settingsSection=null; planManagement && planSection!=null -> planSection=null; planManagement -> planManagement=false; page==5 -> page=0; else -> page=0 }
        }
-     Scaffold(containerColor=AppColors.Background, bottomBar = { if(taskDetailsId==null && gritAnalyticsTaskId==null && !allAchievements && page!=5) AppNavigation(page){page=it;editor=false;gritAnalyticsTaskId=null;allAchievements=false;dismissTaskActions();showContractDialog=false} }) { pad ->
+     Scaffold(containerColor=AppColors.Background, bottomBar = { if(taskDetailsId==null && gritAnalyticsTaskId==null && !allAchievements && page!=5 && !planManagement) AppNavigation(page){page=it;editor=false;planManagement=false;settingsSection=null;gritAnalyticsTaskId=null;allAchievements=false;dismissTaskActions()} }) { pad ->
      Box(Modifier.fillMaxSize()) {
       AnimatedContent(targetState=page,transitionSpec={fadeIn(tween(AppMotion.Standard))+slideInHorizontally(tween(AppMotion.Standard)){it/28} togetherWith fadeOut(tween(AppMotion.Short))+slideOutHorizontally(tween(AppMotion.Short)){ -it/36 }},label="page-transition") { screen ->
-      if (!editor && screen == 0) {
+      if (!editor && screen == 0 && !planManagement) {
        GritTaskListPage(
         modifier=Modifier.fillMaxSize().padding(pad), db=db, date=today, tasks=tasks,
         dailyCard=dailyCardRecords.firstOrNull { it.date == today },
         continuing=continuing, filter=taskFilter,
         confirmed=c.confirmed,
         onFilter={taskFilter=it}, onAdd={dismissTaskActions();targetDay=today;editor=true},
-        onPlan={dismissTaskActions();showContractDialog=true}, onSettings={dismissTaskActions();page=5},
+        onPlan={dismissTaskActions();planManagement=true}, onSettings={dismissTaskActions();settingsSection=null;page=5},
         onDetails={taskDetailsId=it.id},
         onEdit={editingTaskId=it.id;taskDetailsId=it.id},
         onMove={task->taskActionScope.launch { delay(200); movingTask=task }},
@@ -98,35 +112,29 @@ class MainActivity : ComponentActivity() {
       } else if (!editor && screen == 2 && gritAnalyticsTaskId != null) {
        GritHabitAnalyticsPage(db,gritAnalyticsTaskId!!,refresh, Modifier.padding(pad)) { gritAnalyticsTaskId=null }
       } else {
-     val listState=remember(screen){androidx.compose.foundation.lazy.LazyListState()}
+      val listState=remember(screen,settingsSection,planManagement,planSection){androidx.compose.foundation.lazy.LazyListState()}
      LazyColumn(state=listState,modifier=Modifier.fillMaxSize().padding(pad).padding(horizontal=AppSpace.Page), contentPadding=PaddingValues(top=if(screen==5) AppSpace.Small else AppSpace.XLarge,bottom=AppSpace.XLarge), verticalArrangement=Arrangement.spacedBy(AppSpace.Large)) {
       if(editor) {
        item { TaskEditor(targetDay, db, onCancel={ editor=false }, onSave={ editor=false; refresh++ }) }
       } else when(screen) {
-       0 -> {
-         val required=tasks.filter { it.required }; val optional=tasks.filterNot { it.required }
-         item { GritTodayHeader(LocalDate.parse(today).format(DateTimeFormatter.ofPattern("M月d日 · E",Locale.CHINA)),tasks.count{it.done},tasks.size){page=5} }
-         item { GritTaskFilters(taskFilter){taskFilter=it} }
-         item { GritEntertainmentBanner(protected,c.emergency,db.balance("video")>0,db.balance("video")){dismissTaskActions();if(!protected)startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) else page=1} }
-         if(db.setting("changed_$today")=="true") item {Text("今日计划已调整 · 查看成长记录",color=AppColors.Muted)}
-         if(db.setting("gate_changed_$today")=="true") item {Text("必做任务已变更 · 娱乐保护保持开启",color=AppColors.Warning)}
-        if(!c.confirmed) item { ContractEditor(db, c) { refresh++ } }
-        val continuing = db.runningTasks().filter { it.date != today }
-        if(continuing.isNotEmpty()) item { Text("跨日专注 · 计入开始当天，过期奖励不补发",color=Color.LightGray) }
-          items(continuing,key={it.id}) { task -> TaskCard(task,db,focusTimer,onFocus={page=4},onDetails={taskDetailsId=task.id},onChanged={refresh++}) }
-         val sections=when(taskFilter) {
-          1 -> listOf("必做任务" to required)
-          2 -> listOf("选做任务" to optional)
-          else -> listOf("必做任务" to required,"选做任务" to optional)
-         }
-         sections.forEach { (title,itemsForSection) ->
-          if(itemsForSection.isNotEmpty() || taskFilter!=0) {
-           item(key="grit-section-$taskFilter-$title") { GritTaskSectionHeader(title,itemsForSection.count{it.done},itemsForSection.size){targetDay=today;editor=true} }
-            if(itemsForSection.isNotEmpty()) itemsIndexed(itemsForSection,key={_,task->task.id}) { index,task -> TaskCard(task,db,focusTimer,onFocus={page=4},onDetails={taskDetailsId=task.id},onChanged={refresh++},index=index,count=itemsForSection.size) }
+        0 -> {
+         if (planManagement) {
+          if (planSection == null) {
+           item { SettingsPageHeader("计划管理", "今天", onBack={planManagement=false}) }
+           item { SettingsDestinationRow("今日计划", if(c.confirmed) "任务要求已确认" else "确认今天的必做与选做任务", if(c.confirmed) "已确认" else "待确认") { planSection="today" } }
+           item { SettingsDestinationRow("从笔记导入", "预览后添加到明日任务", db.setting("import_draft").takeIf(String::isNotBlank)?.let { "有草稿" }) { planSection="import" } }
+           item { SettingsDestinationRow("提前安排", "查看并编辑未来日期的任务") { planSection="future" } }
+           item { SettingsDestinationRow("历史任务补记与修正", "从日历选择日期，按原验收要求补记") { planManagement=false;planSection=null;page=2 } }
+          } else {
+           item { SettingsPageHeader(when(planSection){"today"->"今日计划";"import"->"从笔记导入";"future"->"提前安排";else->"计划管理"}, "计划管理", onBack={planSection=null}) }
+           when(planSection) {
+            "today" -> item { CardBlock { Text(if(c.confirmed) "今日计划已确认" else "确认今日计划",style=MaterialTheme.typography.titleMedium);ContractEditor(db,c){refresh++} } }
+            "import" -> item { ImportEditor(db,today,refresh){refresh++} }
+            "future" -> item { FuturePlan(db,onAdd={targetDay=it;editor=true}){refresh++} }
+           }
           }
          }
-         if(tasks.isEmpty()) item { GritEmptyTasks(if(c.rest) "今天是休息日 · 记录会保留在成长日历" else "还没有任务 · 添加一项今天要完成的事") }
-       }
+        }
        1 -> {
         item { Header("奖励与额度", "娱乐时间") }
         item { CardBlock {
@@ -148,8 +156,8 @@ class MainActivity : ComponentActivity() {
          if(!c.emergency) EmergencyUnlock(db){refresh++} else TextButton(onClick={db.resumeProtection();refresh++}){Text("恢复应用保护")}
          TextButton(onClick={db.startLearning();refresh++},enabled=!db.learningActive()) {Text(if(db.learningActive()) "B站学习窗口进行中" else "开启 B站15分钟学习窗口")}
          Text("学习窗口临时放行 · 不扣视频额度",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
-         TextButton(onClick={page=5}){Text("受限应用与权限")}
-         TextButton(onClick={page=5}){Text("睡眠记录与规则")}
+         TextButton(onClick={page=5;settingsSection="protection"}){Text("受限应用与权限")}
+         TextButton(onClick={page=5;settingsSection="sleep"}){Text("睡眠记录与规则")}
         } }
         item { CardBlock { Text("最近记录",style=MaterialTheme.typography.titleMedium); val records=db.rewardHistory(); if(records.isEmpty()) Text("奖励发放和使用会显示在这里",color=AppColors.Muted); records.take(3).forEach { record -> TextButton(onClick={selectedRewardRecord=record},contentPadding=PaddingValues(vertical=4.dp,horizontal=0.dp)) {Text(record,style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)} }; if(records.size>3) TextButton(onClick={showAllRewardHistory=true}) { Text("查看全部 ${records.size} 条记录") } } }
        }
@@ -159,36 +167,31 @@ class MainActivity : ComponentActivity() {
         if(dailyCardRecords.isNotEmpty()) item { DailyCardArchive(dailyCardRecords,db){DailyCards.markRevealSeen(db,it);dailyCardDate=it;refresh++} }
        }
        4 -> { item { FocusScreen(db,focusTimer,tasks,onTasks={page=0},onChanged={refresh++}) } }
-       5 -> {
-        item {
-         Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.SpaceBetween) {
-          Text("设置",style=MaterialTheme.typography.headlineSmall)
-          TextButton(onClick={page=0}) { Text("返回今日任务") }
+        5 -> {
+         item { SettingsPageHeader(if(settingsSection==null) "设置" else when(settingsSection){"protection"->"应用保护";"reward"->"奖励规则";"sleep"->"睡眠与作息";"backup"->"数据与备份";else->"关于向前"}, if(settingsSection==null) "今天" else "设置", onBack={if(settingsSection==null)page=0 else settingsSection=null}) }
+         if(settingsSection==null) {
+          val sleepTargets=db.sleepTargets()
+          item { SettingsDestinationRow("应用保护",if(protected) "无障碍服务已连接 · ${store.selected.size} 个受限应用" else "配置受限应用与无障碍权限",if(protected) "运行中" else "未开启"){settingsSection="protection"} }
+          item { SettingsDestinationRow("奖励规则","查看额度重置时间与规则", "${db.setting("boundary","4").padStart(2,'0')}:00"){settingsSection="reward"} }
+          item { SettingsDestinationRow("睡眠与作息","目标、记录与奖励扣减","${sleepTargets[0]} · ${sleepTargets[1]}"){settingsSection="sleep"} }
+          item { SettingsDestinationRow("数据与备份","导出或恢复本地数据"){settingsSection="backup"} }
+          item { SettingsDestinationRow("关于向前","版本与应用信息",BuildConfig.VERSION_NAME){settingsSection="about"} }
+         } else when(settingsSection) {
+          "protection" -> {
+           item { CardBlock { Text(if(protected) "应用保护已开启" else "应用保护未开启",style=MaterialTheme.typography.titleMedium,color=if(protected) AppColors.Accent else AppColors.Text);Text("已选择 ${store.selected.size} 个受限应用",color=AppColors.Muted);SecondaryAction("打开无障碍设置",{startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))});Text("服务连接状态会在返回后更新",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted) } }
+           item { Text("受限应用",style=MaterialTheme.typography.titleMedium) }
+           items(apps,key={it.activityInfo.packageName}) {app->val pkg=app.activityInfo.packageName;Row(Modifier.fillMaxWidth().heightIn(min=52.dp).toggleable(value=pkg in store.selected,onValueChange={checked->store.selected=if(checked)store.selected+pkg else store.selected-pkg;refresh++}).padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically){Text(app.loadLabel(packageManager).toString(),modifier=Modifier.weight(1f));Checkbox(pkg in store.selected,onCheckedChange=null)} }
+          }
+          "reward" -> item { DaySettings(db){refresh++} }
+          "sleep" -> item { SleepCard(db,refresh){refresh++} }
+          "backup" -> item { BackupView(db,{refresh++},{focusTimer.resetAfterRestore()}) }
+          else -> item { CardBlock { Text("向前",style=MaterialTheme.typography.titleLarge);Text("版本 ${BuildConfig.VERSION_NAME}",color=AppColors.Muted);Text("任务、专注与成长记录",color=AppColors.Muted) } }
          }
         }
-         item {CardBlock {Text(if(protected) "应用保护已开启" else "应用保护未开启");SecondaryAction("管理无障碍权限",{startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))});Text("后台受限时，请在系统设置允许向前运行",color=AppColors.Muted)}}
-        item {DaySettings(db){refresh++}}
-        item {SectionHeading("睡眠规则")}
-        item {SleepCard(db,refresh){refresh++}}
-        item {SectionHeading("计划管理")}
-        item {ImportEditor(db,today,refresh){refresh++}}
-        item {FuturePlan(db,onAdd={targetDay=it;editor=true}){refresh++}}
-        item {BackupView(db,{dataVersion++;refresh++},{focusTimer.resetAfterRestore()})}
-        item {Text("受限应用",style=MaterialTheme.typography.titleLarge);Text("已选择 ${store.selected.size} 个应用",color=AppColors.Muted)}
-        items(apps,key={it.activityInfo.packageName}) {app->val pkg=app.activityInfo.packageName;Row(Modifier.fillMaxWidth().toggleable(value=pkg in store.selected,onValueChange={checked->store.selected=if(checked)store.selected+pkg else store.selected-pkg;refresh++}),verticalAlignment=Alignment.CenterVertically){Text(app.loadLabel(packageManager).toString(),modifier=Modifier.weight(1f));Checkbox(pkg in store.selected,onCheckedChange=null)}}
-       }
       }
       }
      }
     }
-     if(showContractDialog) androidx.compose.ui.window.Dialog(onDismissRequest={showContractDialog=false}) {
-      Surface(shape=RoundedCornerShape(28.dp),color=MaterialTheme.colorScheme.surface) {
-       Column(Modifier.fillMaxWidth().padding(16.dp)) {
-        ContractEditor(db,c) { showContractDialog=false;refresh++ }
-        TextButton(onClick={showContractDialog=false},modifier=Modifier.align(Alignment.End)) { Text("稍后确认") }
-       }
-      }
-     }
      selectedRewardRecord?.let { record -> AlertDialog(onDismissRequest={selectedRewardRecord=null},title={Text("奖励记录详情")},text={Text(record)},confirmButton={TextButton(onClick={selectedRewardRecord=null}){Text("完成")}}) }
      if(showAllRewardHistory) AlertDialog(onDismissRequest={showAllRewardHistory=false},title={Text("奖励记录")},text={
       val records=db.rewardHistory()
