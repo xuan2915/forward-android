@@ -9,7 +9,17 @@ internal data class DailyExcerpt(
     val source: String,
     val themes: List<String>,
     val translated: Boolean = true,
-)
+) {
+    /** Reader-facing title; locator details remain in the source record, not on the keepsake. */
+    val displayWork: String
+        get() = work
+            .replace(Regex("\\s*§\\s*\\d+.*$"), "")
+            .replace(Regex("\\s*[IVXLCDM]+(?:\\.\\d+)+$"), "")
+            .replace(Regex("\\s*其[一二三四五六七八九十]+$"), "")
+            .trim()
+
+    val attribution: String get() = "$author · $displayWork"
+}
 
 internal object DailyExcerpts {
     private const val Nietzsche = "https://www.nietzschesource.org/texts/eKGWB/FW"

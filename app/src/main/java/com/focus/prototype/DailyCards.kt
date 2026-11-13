@@ -36,6 +36,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -297,9 +299,7 @@ private fun DailyEditorialCard(record: DailyCardRecord, db: Database, modifier: 
     val date = LocalDate.parse(record.date)
     val harbor = record.edition == CardEdition.Sky
     val excerpt = DailyExcerpts.find(record.excerptId)
-    val attribution = excerpt?.let {
-        "${it.author} · ${it.work}" + if (it.translated) " · 向前意译" else ""
-    } ?: legacyExcerpt(record.quote).source
+    val attribution = excerpt?.attribution ?: legacyExcerpt(record.quote).source
     val weekday = date.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, Locale.CHINA)
     val artwork = painterResource(record.edition.artwork)
     val photo = remember(record.photoId, previewPhotoPath) {
@@ -316,8 +316,10 @@ private fun DailyEditorialCard(record: DailyCardRecord, db: Database, modifier: 
         val width = maxWidth
         val inset = width * .085f
         val serif = FontFamily.Serif
+        val refinedSans = FontFamily(Font(R.font.figtree))
         val daySize = (width.value * .16f).sp
         val detailSize = (width.value * .037f).sp
+        val sourceSize = (width.value * .032f).sp
         val quoteSize = (width.value * if (record.quote.length > 34) .062f else .073f).sp
         val month = "${date.year} 年 ${date.monthValue} 月"
 
@@ -327,27 +329,31 @@ private fun DailyEditorialCard(record: DailyCardRecord, db: Database, modifier: 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
                     Column {
-                        Text(month, color = AppColors.PaperMuted, fontSize = detailSize, fontFamily = serif)
-                        Text(weekday, color = AppColors.PaperMuted, fontSize = detailSize, fontFamily = serif)
+                        Text(month, color = AppColors.PaperMuted, fontSize = detailSize, fontFamily = refinedSans,
+                            fontWeight = FontWeight.Medium, letterSpacing = .18.sp, lineHeight = detailSize * 1.28f)
+                        Text(weekday, color = AppColors.PaperMuted, fontSize = sourceSize, fontFamily = refinedSans,
+                            letterSpacing = .22.sp, lineHeight = sourceSize * 1.32f)
                     }
                     Text(date.dayOfMonth.toString().padStart(2, '0'), color = ink,
-                        fontFamily = serif, fontSize = daySize, lineHeight = daySize * 1.05f)
+                        fontFamily = serif, fontWeight = FontWeight.Light, fontSize = daySize,
+                        letterSpacing = (-daySize.value * .045f).sp, lineHeight = daySize * 1.02f)
                 }
                 Spacer(Modifier.height(width * .045f))
                 if (record.quote.isNotBlank()) {
                     Text(record.quote, color = ink, fontFamily = serif, fontSize = quoteSize,
-                        lineHeight = quoteSize * 1.46f, modifier = Modifier.fillMaxWidth())
+                        fontWeight = FontWeight.Normal, letterSpacing = .06.sp,
+                        lineHeight = quoteSize * 1.39f, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(width * .044f))
-                    Text(attribution, color = AppColors.PaperMuted, fontFamily = serif, fontSize = detailSize,
-                        lineHeight = detailSize * 1.4f)
+                    Text(attribution, color = AppColors.PaperMuted, fontFamily = refinedSans, fontSize = sourceSize,
+                        fontWeight = FontWeight.Medium, letterSpacing = .18.sp, lineHeight = sourceSize * 1.38f)
                 }
                 if (record.selectedTaskIds.isNotEmpty()) {
                     Spacer(Modifier.height(width * .055f))
-                    record.taskTitles.take(3).forEach { Text(it, color = ink, fontFamily = serif, fontSize = detailSize * 1.13f, lineHeight = detailSize * 1.5f) }
+                    record.taskTitles.take(3).forEach { Text(it, color = ink, fontFamily = refinedSans, fontSize = detailSize * 1.08f, lineHeight = detailSize * 1.48f) }
                 }
                 if (record.note.isNotBlank()) {
                     Spacer(Modifier.height(width * .045f))
-                    Text(record.note, color = ink, fontFamily = serif, fontSize = detailSize * 1.13f, lineHeight = detailSize * 1.5f)
+                    Text(record.note, color = ink, fontFamily = refinedSans, fontSize = detailSize * 1.08f, lineHeight = detailSize * 1.5f)
                 }
                 Spacer(Modifier.height(width * .072f))
                 when (record.visual) {
@@ -361,7 +367,8 @@ private fun DailyEditorialCard(record: DailyCardRecord, db: Database, modifier: 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.Bottom) {
                     Text("完成 ${record.completed} 项 · 专注 ${record.focusMinutes} 分钟",
-                        color = AppColors.PaperMuted, fontSize = detailSize, modifier = Modifier.weight(1f))
+                        color = AppColors.PaperMuted, fontFamily = refinedSans, fontWeight = FontWeight.Medium,
+                        fontSize = sourceSize, letterSpacing = .12.sp, modifier = Modifier.weight(1f))
                     Text("向前", color = ink, fontFamily = serif, fontSize = detailSize)
                 }
                 Spacer(Modifier.height(width * .061f))
@@ -415,13 +422,13 @@ internal fun DailyCardEditor(db: Database, date: String, tasks: List<Task>, onDi
                         TextButton(onClick = { excerptId = "" }) { Text(if (excerptId.isEmpty()) "✓ 不添加引文" else "不添加引文") }
                         if (excerptId == "__legacy__") Text("原有引文 · ${source.quote}")
                         if (excerpt != null) {
-                            Text("${excerpt.chinese}\n${excerpt.author} · ${excerpt.work}${if (excerpt.translated) " · 向前意译" else ""}")
+                            Text("${excerpt.chinese}\n${excerpt.attribution}")
                             TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(excerpt.source))) }) { Text("查看原文出处") }
                         }
                         TextButton(onClick = { quotesExpanded = !quotesExpanded }) { Text(if (quotesExpanded) "收起引文" else "选择引文") }
                         if (quotesExpanded) DailyExcerpts.entries.forEach { item ->
                             TextButton(onClick = { excerptId = item.id; quotesExpanded = false }, modifier = Modifier.fillMaxWidth()) {
-                                Text("${item.chinese}\n${item.author} · ${item.work}${if (item.translated) " · 向前意译" else ""}", modifier = Modifier.fillMaxWidth())
+                                Text("${item.chinese}\n${item.attribution}", modifier = Modifier.fillMaxWidth())
                             }
                         }
                         Text("画面", style = MaterialTheme.typography.titleMedium)

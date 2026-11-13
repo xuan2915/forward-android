@@ -26,6 +26,18 @@ class DailyCardRulesTest {
             it.author.isNotBlank() && it.work.isNotBlank() && it.source.startsWith("https://") &&
             it.themes.isNotEmpty() })
     }
+
+    @Test fun readerAttributionOmitsPageSectionAndTranslationLabels() {
+        assertEquals("尼采 · 《快乐的科学》", DailyExcerpts.find("fw270")!!.attribution)
+        assertEquals("塞涅卡 · 《论生命之短暂》", DailyExcerpts.find("brev1a")!!.attribution)
+        assertEquals("陶渊明 · 《移居》", DailyExcerpts.find("tao-reading")!!.attribution)
+        assertTrue(DailyExcerpts.entries.all { excerpt ->
+            !excerpt.attribution.contains('§') &&
+                !excerpt.attribution.contains("向前意译") &&
+                !excerpt.attribution.matches(Regex(".*\\b[IVXLCDM]+\\.\\d+.*"))
+        })
+    }
+
     @Test fun emptyDayDoesNotCreateCard() {
         assertFalse(dailyCardQualifies(emptyList()))
     }
