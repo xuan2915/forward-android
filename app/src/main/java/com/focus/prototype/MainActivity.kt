@@ -86,7 +86,7 @@ class MainActivity : ComponentActivity() {
    }
    val protected = remember(tick) { val id = ComponentName(this,FocusService::class.java).flattenToString(); FocusService.connected && Settings.Secure.getString(contentResolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)?.split(':')?.any { it.equals(id,true) } == true }
    LaunchedEffect(refresh) { if (newAchievement == null) newAchievement = nextUnseenAchievement(db) }
-   FocusTheme { MotionHost(db.xp(),showToast=page!=2 && taskDetailsId==null && newAchievement==null && dailyCardOpenDate==null && dailyCardDate==null) {
+   FocusTheme { MotionHost(db.xp(),showToast=page!=2 && dailyCardOpenDate==null && dailyCardDate==null && (taskDetailsId!=null || newAchievement==null)) {
        androidx.activity.compose.BackHandler(enabled=allAchievements || gritAnalyticsTaskId!=null || settingsSection!=null || planManagement || page==5 || editor || dailyCardOpenDate!=null || dailyCardDate!=null) {
         when { dailyCardOpenDate!=null -> {DailyCards.markRevealSeen(db,dailyCardOpenDate!!);dailyCardOpenDate=null;refresh++}; dailyCardDate!=null -> dailyCardDate=null; allAchievements -> allAchievements=false; gritAnalyticsTaskId!=null -> gritAnalyticsTaskId=null; editor -> editor=false; settingsSection!=null -> settingsSection=null; planManagement && planSection!=null -> planSection=null; planManagement -> planManagement=false; page==5 -> page=0; else -> page=0 }
        }

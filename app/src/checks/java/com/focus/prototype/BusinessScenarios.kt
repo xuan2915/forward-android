@@ -24,6 +24,19 @@ fun resign(root:org.json.JSONObject,payload:org.json.JSONObject):String { val bo
    test("optional choice idempotency and consumption") {
     val optional=db.tasks().first{!it.required};db.complete(optional);repeat(3){db.claim(optional,"video")};db.claim(optional,"game");check(db.balance("video")==2400000L);check(db.balance("game")==1L);db.consume("video",60000);check(db.balance("video")==2340000L)
    }
+   test("revoking optional completion reverses available reward and reopens claim") {
+    val other="optional-revoke-reward.db";context.deleteDatabase(other);val d=Database(context,other,now={now})
+    try {
+     val date=d.day();d.addTask(date,"required",true,0,"行动型","",0,0,"once");d.addTask(date,"optional",false,0,"行动型","",10,1,"once");d.confirm(date,false,0,0)
+     d.complete(d.tasks(date).first{it.required});val optional=d.tasks(date).first{!it.required};d.complete(optional);d.claim(optional,"video")
+     check(d.balance("video")==600000L&&d.tasks(date).first{it.id==optional.id}.claimed)
+     d.consume("video",300000L);d.revoke(d.tasks(date).first{it.id==optional.id})
+     val reopened=d.tasks(date).first{it.id==optional.id};check(!reopened.done&&!reopened.claimed&&d.balance("video")==0L)
+     d.complete(reopened);val completedAgain=d.tasks(date).first{it.id==optional.id};check(completedAgain.done&&!completedAgain.claimed)
+     d.claim(completedAgain,"video");d.claim(completedAgain,"video")
+     val snapshot=d.rewardSnapshot("video");check(snapshot.used==300000L&&snapshot.reversed==300000L&&snapshot.remaining==600000L)
+    } finally {d.close()}
+   }
    test("reopen preserves completion and balance") {
     db.close();db=Database(context,name){now};check(db.tasks().count{it.done}==2);check(db.balance("video")==2340000L);db.complete(db.tasks().first{it.required});check(db.balance("video")==2340000L)
    }

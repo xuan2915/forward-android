@@ -312,7 +312,10 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
       if(reversal > 0) ledger(db,bucket,"revoke:$source",kind,-reversal)
      }
     }
-    db.update("tasks",cv("done" to false,"completed_at" to 0L),"id=?",arrayOf(task.id))
+    // Reopening an optional task must also reopen its one-time reward choice.
+    // Its previous reward remains in the ledger (with any available amount
+    // reversed above), but a fresh completion can be claimed again.
+    db.update("tasks",cv("done" to false,"claimed" to false,"completed_at" to 0L),"id=?",arrayOf(task.id))
     for(kind in listOf("video","game"))setSetting("task_reward_${fresh.id}_$kind","false")
     audit(task.date,"撤销任务：${fresh.title}；已领取额度按剩余余额冲正")
    }

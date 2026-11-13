@@ -40,7 +40,7 @@ data class GrowthMotion(val xp:Float, val feedback:String)
  CompositionLocalProvider(LocalReducedMotion provides reduced,LocalGrowthMotion provides GrowthMotion(value.value,feedback)) {
   Box(Modifier.fillMaxSize()) {
    content()
-   if(showToast) AnimatedVisibility(feedback.isNotEmpty(),modifier=Modifier.align(Alignment.BottomCenter).padding(start=22.dp,end=22.dp,bottom=116.dp),enter=fadeIn(tween(motionMillis()))+slideInVertically(tween(motionMillis())){it/6},exit=fadeOut(tween(motionMillis()))) {
+   if(showToast) AnimatedVisibility(feedback.isNotEmpty(),modifier=Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(start=22.dp,end=22.dp,top=12.dp),enter=fadeIn(tween(motionMillis()))+slideInVertically(tween(motionMillis())){ -it/3 },exit=fadeOut(tween(motionMillis()))) {
     Surface(shape=detachedItemShape(),color=MaterialTheme.colorScheme.surfaceContainerHighest,shadowElevation=2.dp) {
      Row(Modifier.padding(horizontal=16.dp,vertical=12.dp),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalAlignment=Alignment.CenterVertically) {
       CircularProgressIndicator(progress={(value.value%500)/500f},modifier=Modifier.size(32.dp),strokeWidth=3.dp,trackColor=MaterialTheme.colorScheme.outlineVariant)
