@@ -99,16 +99,12 @@ internal fun achievementList(db: Database): List<Achievement> {
     }
     fun streakDate(target: Int): String? {
         var run = 0
-        var previous: LocalDate? = null
         for ((date, state) in db.history().sortedBy { it.first }) {
-            val current = LocalDate.parse(date)
-            if (previous != null && current != previous!!.plusDays(1)) run = 0
             when (state) {
                 "完成" -> { run++; if (run >= target) return date }
-                "休息" -> Unit
-                else -> run = 0
+                "未完成" -> run = 0
+                else -> Unit
             }
-            previous = current
         }
         return null
     }

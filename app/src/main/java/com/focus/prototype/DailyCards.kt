@@ -120,7 +120,7 @@ private fun legacyExcerpt(stored: String): LiteraryExcerpt =
     excerpts.firstOrNull { it.text == stored } ?: LiteraryExcerpt(stored, "向前原创")
 
 internal fun dailyCardQualifies(tasks: List<Task>): Boolean =
-    tasks.isNotEmpty() && tasks.all { it.done }
+    requiredGoalAchieved(tasks)
 
 internal object DailyCards {
     private const val PREFIX = "daily_card_"

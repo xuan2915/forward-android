@@ -24,7 +24,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -39,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.BoxWithConstraints
+import kotlinx.coroutines.delay
 
 /** The clock supplies the progress; the vessel only renders it. */
 @Composable
@@ -49,8 +52,17 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
         ?: tasks.firstOrNull { !it.done }
     val phase = timer.phase
     val mode = timer.mode
-    val remaining = timer.remaining()
-    val elapsed = timer.elapsed()
+    var displayTick by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(phase) {
+        if (phase == "work" || phase == "break") {
+            while (true) {
+                delay(1_000L)
+                displayTick++
+            }
+        }
+    }
+    val remaining = remember(displayTick, phase) { timer.remaining() }
+    val elapsed = remember(displayTick, phase, mode) { timer.elapsed() }
     val sampledAt = SystemClock.elapsedRealtime()
     var chooseTask by remember { mutableStateOf(false) }
     val pausedFrom = db.setting("focus_paused_phase")
@@ -64,13 +76,13 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
         else -> formatFocusTime(remaining)
     }
     val freeSand = freeMode && !isRest
-    val sandDuration = if (isRest) mode.breakMillis else mode.workMillis
+    val sandDuration = when { isRest -> mode.breakMillis; freeSand -> 120_000L; else -> mode.workMillis }
     val sandElapsed = when {
         phase == "ready" -> 0L
         freeSand -> elapsed
         else -> (sandDuration - remaining).coerceAtLeast(0L)
     }
-    val sand = SandClock(sandElapsed, sandDuration, sampledAt)
+    val sand = SandClock(sandElapsed, sandDuration, sampledAt, looping = freeSand)
     val phaseColor by animateColorAsState(
         targetValue = if (isRest) MaterialTheme.colorScheme.secondary else AppColors.Accent,
         animationSpec = tween(motionMillis(420), easing = AppMotion.Ease),

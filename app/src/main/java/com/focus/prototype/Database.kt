@@ -10,15 +10,16 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
 
-data class Task(val id: String, val date: String, val title: String, val required: Boolean, val minutes: Int, val mode: String, val checklist: String, val rewardMinutes: Int, val rewardGames: Int, val elapsed: Long, val runningSince: Long, val bootTime: Long, val evidence: String, val done: Boolean, val claimed: Boolean)
+data class Task(val id: String, val date: String, val title: String, val required: Boolean, val minutes: Int, val mode: String, val checklist: String, val rewardMinutes: Int, val rewardGames: Int, val elapsed: Long, val runningSince: Long, val bootTime: Long, val evidence: String, val done: Boolean, val claimed: Boolean, val completedAt: Long = 0L)
 data class Contract(val date: String, val confirmed: Boolean, val rest: Boolean, val baseMinutes: Int, val baseGames: Int, val baseClaimed: Boolean, val emergency: Boolean)
 data class SleepRecord(val date:String,val bedtime:String,val wakeTime:String,val bedtimePenalty:Long,val wakePenalty:Long,val excepted:Boolean,val reason:String,val source:String="manual")
 data class RewardSnapshot(val earned:Long,val used:Long,val sleepDeducted:Long,val expired:Long,val reversed:Long,val remaining:Long)
+data class GrowthPeriodStats(val planDays:Int,val achievedDays:Int,val weekPlanDays:Int,val weekAchievedDays:Int,val focusMillis:Long)
 
-class Database(context: Context, name:String = "journey.db", private val now:()->LocalDateTime = { LocalDateTime.now() }) : SQLiteOpenHelper(context, name, null, 4), java.io.Closeable {
+class Database(context: Context, name:String = "journey.db", private val wallNow:()->Long = { System.currentTimeMillis() }, private val now:()->LocalDateTime = { LocalDateTime.now() }) : SQLiteOpenHelper(context, name, null, 5), java.io.Closeable {
  override fun onCreate(db: SQLiteDatabase) {
   db.execSQL("CREATE TABLE contracts(day TEXT PRIMARY KEY, confirmed INTEGER NOT NULL DEFAULT 0, rest INTEGER NOT NULL DEFAULT 0, base_minutes INTEGER NOT NULL DEFAULT 30, base_games INTEGER NOT NULL DEFAULT 0, base_claimed INTEGER NOT NULL DEFAULT 0, emergency INTEGER NOT NULL DEFAULT 0, boundary INTEGER NOT NULL DEFAULT 4)")
-  db.execSQL("CREATE TABLE tasks(id TEXT PRIMARY KEY, day TEXT NOT NULL, title TEXT NOT NULL, required INTEGER NOT NULL, minutes INTEGER NOT NULL, mode TEXT NOT NULL, checklist TEXT NOT NULL, reward_minutes INTEGER NOT NULL, reward_games INTEGER NOT NULL, elapsed INTEGER NOT NULL DEFAULT 0, running_since INTEGER NOT NULL DEFAULT 0, boot_time INTEGER NOT NULL DEFAULT 0, evidence TEXT NOT NULL DEFAULT '', done INTEGER NOT NULL DEFAULT 0, claimed INTEGER NOT NULL DEFAULT 0, recurrence TEXT NOT NULL DEFAULT 'once', origin TEXT NOT NULL DEFAULT '')")
+  db.execSQL("CREATE TABLE tasks(id TEXT PRIMARY KEY, day TEXT NOT NULL, title TEXT NOT NULL, required INTEGER NOT NULL, minutes INTEGER NOT NULL, mode TEXT NOT NULL, checklist TEXT NOT NULL, reward_minutes INTEGER NOT NULL, reward_games INTEGER NOT NULL, elapsed INTEGER NOT NULL DEFAULT 0, running_since INTEGER NOT NULL DEFAULT 0, boot_time INTEGER NOT NULL DEFAULT 0, evidence TEXT NOT NULL DEFAULT '', done INTEGER NOT NULL DEFAULT 0, claimed INTEGER NOT NULL DEFAULT 0, recurrence TEXT NOT NULL DEFAULT 'once', origin TEXT NOT NULL DEFAULT '', completed_at INTEGER NOT NULL DEFAULT 0)")
   db.execSQL("CREATE TABLE ledger(id TEXT PRIMARY KEY, day TEXT NOT NULL, task_id TEXT NOT NULL, kind TEXT NOT NULL, amount INTEGER NOT NULL, created INTEGER NOT NULL)")
   db.execSQL("CREATE TABLE reviews(day TEXT PRIMARY KEY, problem TEXT NOT NULL, praise TEXT NOT NULL, note TEXT NOT NULL)")
   db.execSQL("CREATE TABLE audit(id TEXT PRIMARY KEY, day TEXT NOT NULL, detail TEXT NOT NULL, created INTEGER NOT NULL)")
@@ -27,7 +28,7 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
   upgradeTemplates(db)
   upgradeAttachments(db)
  }
- override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) { if(oldVersion<2) upgradeTemplates(db);if(oldVersion<3) upgradeAttachments(db);if(oldVersion<4)db.execSQL("CREATE TABLE IF NOT EXISTS task_moves(source_id TEXT PRIMARY KEY,target_id TEXT NOT NULL,from_day TEXT NOT NULL,to_day TEXT NOT NULL,created INTEGER NOT NULL)") }
+ override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) { if(oldVersion<2) upgradeTemplates(db);if(oldVersion<3) upgradeAttachments(db);if(oldVersion<4)db.execSQL("CREATE TABLE IF NOT EXISTS task_moves(source_id TEXT PRIMARY KEY,target_id TEXT NOT NULL,from_day TEXT NOT NULL,to_day TEXT NOT NULL,created INTEGER NOT NULL)");if(oldVersion<5)db.execSQL("ALTER TABLE tasks ADD COLUMN completed_at INTEGER NOT NULL DEFAULT 0") }
  private fun upgradeAttachments(db:SQLiteDatabase) {
   db.execSQL("CREATE TABLE attachments(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,path TEXT NOT NULL,created INTEGER NOT NULL)")
   seedAttachments(db)
@@ -55,7 +56,7 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
  private fun Cursor.i(name: String) = getInt(getColumnIndexOrThrow(name))
  private fun Cursor.l(name: String) = getLong(getColumnIndexOrThrow(name))
  private fun Cursor.b(name: String) = i(name) != 0
- private fun Cursor.task() = Task(s("id"),s("day"),s("title"),b("required"),i("minutes"),s("mode"),s("checklist"),i("reward_minutes"),i("reward_games"),l("elapsed"),l("running_since"),l("boot_time"),s("evidence"),b("done"),b("claimed"))
+ private fun Cursor.task() = Task(s("id"),s("day"),s("title"),b("required"),i("minutes"),s("mode"),s("checklist"),i("reward_minutes"),i("reward_games"),l("elapsed"),l("running_since"),l("boot_time"),s("evidence"),b("done"),b("claimed"),l("completed_at"))
  fun setting(key: String, default: String = ""): String = readableDatabase.rawQuery("SELECT value FROM settings WHERE key=?", arrayOf(key)).use { if (it.moveToFirst()) it.getString(0) else default }
  fun setSetting(key: String, value: String) { writableDatabase.insertWithOnConflict("settings", null, cv("key" to key,"value" to value), SQLiteDatabase.CONFLICT_REPLACE) }
  fun importPlan(target: String, drafts: List<PlanDraft>) {
@@ -131,7 +132,8 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
   val c = contract(day); require(!c.confirmed); require(!rest || tasks(day).none { it.required })
   writableDatabase.update("contracts",cv("confirmed" to true,"rest" to rest,"base_minutes" to minutes,"base_games" to games),"day=?", arrayOf(day))
  }
- fun eligible(day: String = day()): Boolean { val c = contract(day); val required = tasks(day,includeMoved=true).filter { it.required }; return setting("gate_changed_$day")!="true" && c.confirmed && (required.isNotEmpty() && required.all { it.done } || required.isEmpty() && c.rest) }
+ fun goalState(date:String):DailyGoalState { val c=contract(date);return dailyGoalState(tasks(date,includeMoved=true),c.rest,date,day()) }
+ fun eligible(day: String = day()): Boolean { val c = contract(day); val dayTasks=tasks(day,includeMoved=true); return setting("gate_changed_$day")!="true" && c.confirmed && (requiredGoalAchieved(dayTasks) || dayTasks.none { it.required } && c.rest) }
  private fun ledger(db: SQLiteDatabase, day: String, task: String, kind: String, amount: Long) = ledgerAt(db,day,task,kind,amount,System.currentTimeMillis())
  private fun ledgerAt(db: SQLiteDatabase, day: String, task: String, kind: String, amount: Long,created:Long) { db.insertOrThrow("ledger", null, cv("id" to UUID.randomUUID().toString(),"day" to day,"task_id" to task,"kind" to kind,"amount" to amount,"created" to created)) }
  private fun allocationKind(kind:String)="${kind}_allocation"
@@ -208,9 +210,11 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
   try {
    val fresh=tasks(task.date).first { it.id == task.id }
    if(fresh.done) { db.setTransactionSuccessful();return }
+   require(fresh.date<=day()) { "未来任务不能提前标记为完成" }
    require(fresh.elapsed >= fresh.minutes * 60000L && (fresh.mode == "行动型" || fresh.evidence.isNotBlank()))
-   db.update("tasks",cv("done" to true),"id=?",arrayOf(task.id))
-   if(task.date==day() && fresh.required) {
+   val completedAt=wallNow()
+   db.update("tasks",cv("done" to true,"completed_at" to completedAt),"id=?",arrayOf(task.id))
+   if(fresh.required) {
     listOf("video" to fresh.rewardMinutes.toLong()*60000L,"game" to fresh.rewardGames.toLong()).forEach { (kind,amount) ->
      val key="task_reward_${fresh.id}_$kind"
      if(amount>0 && setting(key)!="true") { grantReward(db,rewardDay(),fresh.id,kind,amount);setSetting(key,"true") }
@@ -242,7 +246,7 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
    pause(fresh)
    val reusableTarget=duplicate?.get(0)
    val targetId=reusableTarget?:UUID.randomUUID().toString()
-   val targetValues=cv("title" to fresh.title,"required" to fresh.required,"minutes" to fresh.minutes,"mode" to fresh.mode,"checklist" to fresh.checklist,"reward_minutes" to fresh.rewardMinutes,"reward_games" to fresh.rewardGames,"elapsed" to fresh.elapsed,"running_since" to 0L,"boot_time" to 0L,"evidence" to fresh.evidence,"done" to false,"claimed" to false,"recurrence" to source.second,"origin" to source.third)
+   val targetValues=cv("title" to fresh.title,"required" to fresh.required,"minutes" to fresh.minutes,"mode" to fresh.mode,"checklist" to fresh.checklist,"reward_minutes" to fresh.rewardMinutes,"reward_games" to fresh.rewardGames,"elapsed" to fresh.elapsed,"running_since" to 0L,"boot_time" to 0L,"evidence" to fresh.evidence,"done" to false,"claimed" to false,"completed_at" to 0L,"recurrence" to source.second,"origin" to source.third)
    if(reusableTarget!=null)db.update("tasks",targetValues,"id=?",arrayOf(targetId)) else db.insertOrThrow("tasks",null,targetValues.apply{put("id",targetId);put("template_id",source.first);put("day",targetDay)})
    db.insertOrThrow("task_moves",null,cv("source_id" to task.id,"target_id" to targetId,"from_day" to task.date,"to_day" to targetDay,"created" to System.currentTimeMillis()))
    db.rawQuery("SELECT path,created FROM attachments WHERE task_id=?",arrayOf(task.id)).use { c -> while(c.moveToNext())db.insertOrThrow("attachments",null,cv("id" to UUID.randomUUID().toString(),"task_id" to targetId,"path" to c.getString(0),"created" to c.getLong(1))) }
@@ -259,8 +263,9 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
  }
  fun settleToday() { contract(day()) }
  fun bestStreak():Int {
-  val states=history().filter{it.first<=day()}.sortedBy{it.first};var best=0;var count=0;var previous:LocalDate?=null
-  for((date,state) in states){val d=LocalDate.parse(date);if(previous!=null && d!=previous!!.plusDays(1))count=0;when(state){"完成"->count++;"休息"->Unit;else->count=0};best=maxOf(best,count);previous=d};return best
+  val states=history().filter{it.first<=day()}.sortedBy{it.first};var best=0;var count=0
+  for((_,state) in states){when(state){"完成"->count++;"未完成"->count=0;else->Unit};best=maxOf(best,count)}
+  return best
  }
  fun revise(task:Task,title:String,required:Boolean,minutes:Int,mode:String,checklist:String,video:Int,games:Int,recurrence:String,reason:String,delete:Boolean=false,applyFuture:Boolean=false) {
   val db=writableDatabase; db.beginTransaction()
@@ -307,7 +312,9 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
       if(reversal > 0) ledger(db,bucket,"revoke:$source",kind,-reversal)
      }
     }
-    db.update("tasks",cv("done" to false),"id=?",arrayOf(task.id)); audit(task.date,"撤销任务：${fresh.title}；已领取额度按剩余余额冲正")
+    db.update("tasks",cv("done" to false,"completed_at" to 0L),"id=?",arrayOf(task.id))
+    for(kind in listOf("video","game"))setSetting("task_reward_${fresh.id}_$kind","false")
+    audit(task.date,"撤销任务：${fresh.title}；已领取额度按剩余余额冲正")
    }
    db.setTransactionSuccessful()
   } finally { db.endTransaction() }
@@ -371,12 +378,40 @@ class Database(context: Context, name:String = "journey.db", private val now:()-
  fun audit(day: String, detail: String) { writableDatabase.insert("audit",null,cv("id" to UUID.randomUUID().toString(),"day" to day,"detail" to detail,"created" to System.currentTimeMillis())) }
  fun review(day: String, problem: String, praise: String, note: String) { writableDatabase.insertWithOnConflict("reviews",null,cv("day" to day,"problem" to problem,"praise" to praise,"note" to note),SQLiteDatabase.CONFLICT_REPLACE) }
  fun readReview(day: String): List<String> = readableDatabase.rawQuery("SELECT problem,praise,note FROM reviews WHERE day=?",arrayOf(day)).use { if(it.moveToFirst()) listOf(it.getString(0),it.getString(1),it.getString(2)) else listOf("","","") }
- fun history(): List<Pair<String,String>> { val days=mutableListOf<String>(); readableDatabase.rawQuery("SELECT day FROM contracts ORDER BY day DESC",null).use { while(it.moveToNext()) days.add(it.getString(0)) }; return days.map { d -> val c=contract(d); d to when { !c.confirmed -> if(d<day()) "未完成" else "待确认"; c.rest -> "休息"; eligible(d) -> "完成"; else -> "未完成" } } }
+ fun history(): List<Pair<String,String>> {
+  val days=mutableListOf<String>();readableDatabase.rawQuery("SELECT day FROM contracts ORDER BY day DESC",null).use{while(it.moveToNext())days.add(it.getString(0))}
+  return days.map { date -> date to when(goalState(date)) {
+   DailyGoalState.ACHIEVED -> "完成"
+   DailyGoalState.MISSED -> "未完成"
+   DailyGoalState.REST -> "休息"
+   DailyGoalState.NO_REQUIRED_TASKS -> "无必做"
+   DailyGoalState.UNPLANNED -> "未安排"
+   DailyGoalState.IN_PROGRESS -> "进行中"
+   DailyGoalState.FUTURE -> "未来"
+  } }
+ }
+ fun growthPeriodStats(today:String=day()):GrowthPeriodStats {
+  val end=LocalDate.parse(today);val from30=end.minusDays(29);val from7=end.minusDays((end.dayOfWeek.value-1).toLong())
+  var plan30=0;var achieved30=0;var plan7=0;var achieved7=0
+  var cursor=from30
+  while(!cursor.isAfter(end)) {
+   val date=cursor.toString()
+   val contractRow=readableDatabase.rawQuery("SELECT confirmed,rest FROM contracts WHERE day=?",arrayOf(date)).use{if(it.moveToFirst())(it.getInt(0)!=0) to (it.getInt(1)!=0) else null}
+   var required=0;var done=0
+   readableDatabase.rawQuery("SELECT required,done FROM tasks WHERE day=? AND id NOT IN (SELECT source_id FROM task_moves)",arrayOf(date)).use{while(it.moveToNext())if(it.getInt(0)!=0){required++;if(it.getInt(1)!=0)done++}}
+   val valid=contractRow?.second!=true&&required>0
+   if(valid){plan30++;if(done==required)achieved30++;if(!cursor.isBefore(from7)){plan7++;if(done==required)achieved7++}}
+   cursor=cursor.plusDays(1)
+  }
+  var focus=readableDatabase.rawQuery("SELECT COALESCE(SUM(elapsed),0) FROM tasks WHERE id NOT IN (SELECT source_id FROM task_moves) AND day<=?",arrayOf(today)).use{it.moveToFirst();it.getLong(0)}
+  runningTasks().forEach{task->focus+=(elapsed(task)-task.elapsed).coerceAtLeast(0L)}
+  return GrowthPeriodStats(plan30,achieved30,plan7,achieved7,focus)
+ }
  fun xp(): Int = readableDatabase.rawQuery("SELECT COUNT(*) FROM tasks WHERE done=1 AND id NOT IN (SELECT source_id FROM task_moves)", null).use { it.moveToFirst(); it.getInt(0)*100 }
  fun streak(): Int {
-  val states=history().toMap(); var d=LocalDate.parse(day()); var count=0
-  if(states[d.toString()] != "完成" && states[d.toString()] != "休息") d=d.minusDays(1)
-  repeat(36500) { when(states[d.toString()]) { "完成" -> count++; "休息" -> Unit; else -> return count }; d=d.minusDays(1) }
+  val states=history().toMap();var d=LocalDate.parse(day());var count=0
+  if(states[d.toString()]!="完成")d=d.minusDays(1)
+  repeat(36500){when(states[d.toString()]){"完成"->count++;"未完成"->return count;else->Unit};d=d.minusDays(1)}
   return count
  }
 }

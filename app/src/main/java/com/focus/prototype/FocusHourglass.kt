@@ -17,17 +17,26 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.unit.dp
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-internal data class SandClock(val elapsed: Long, val duration: Long, val sampledAt: Long) {
-    fun progressAt(now: Long, running: Boolean): Float {
-        if (duration <= 0L) return 0f
-        val sinceSample = if (running) (now - sampledAt).coerceAtLeast(0L) else 0L
-        return ((elapsed + sinceSample).toFloat() / duration).coerceIn(0f, 1f)
+internal data class SandClock(val elapsed: Long, val duration: Long, val sampledAt: Long, val looping:Boolean=false) {
+    private fun liveElapsed(now:Long,running:Boolean)=elapsed+(if(running)(now-sampledAt).coerceAtLeast(0L) else 0L)
+    fun rawProgressAt(now:Long,running:Boolean):Float {
+        if(duration<=0L)return 0f
+        val value=liveElapsed(now,running)
+        return if(looping)(value%duration).toFloat()/duration else (value.toFloat()/duration).coerceIn(0f,1f)
+    }
+    fun progressAt(now: Long, running: Boolean): Float = if(looping) (rawProgressAt(now,running)/.97f).coerceIn(0f,1f) else rawProgressAt(now,running)
+    fun rotationAt(now:Long,running:Boolean):Float {
+        if(!looping)return 0f
+        val flip=((rawProgressAt(now,running)-.97f)/.03f).coerceIn(0f,1f)
+        val eased=flip*flip*(3f-2f*flip)
+        return 180f*eased
     }
 }
 
@@ -110,13 +119,15 @@ internal fun FocusHourglass(
             onDrawBehind {
                 val now = frame.longValue
                 val progress = clock.progressAt(now, running && !reduced)
-                val upperAmount = if (free) .71f else 1f - progress
-                val lowerAmount = if (free) .19f else progress
+                val rotation = if(reduced) 0f else clock.rotationAt(now,running)
+                val upperAmount = 1f - progress
+                val lowerAmount = progress
                 val surfaceY = .468f - .343f * sqrt(upperAmount)
                 val pileHeight = .286f * lowerAmount.pow(.72f)
                 val mound = .085f * (lowerAmount * 9f).coerceAtMost(1f) * (1f - lowerAmount * .55f)
                 val pileBase = .908f - pileHeight
                 val pilePeak = pileBase - mound
+                rotate(rotation,Offset(w/2f,h/2f)) {
                 drawPath(outline, AppColors.Background)
                 clipPath(outline) {
                     if (upperAmount > 0f) {
@@ -140,7 +151,7 @@ internal fun FocusHourglass(
                         lower.close()
                         drawPath(lower, tint.copy(alpha = .82f))
                     }
-                    if (!reduced && (running || settling) && (free || progress < 1f)) {
+                    if (!reduced && (running || settling) && (free || progress < 1f) && rotation<90f) {
                         val distance = (pilePeak - Neck).coerceAtLeast(.01f)
                         val fallSeconds = (sqrt(InitialSpeed * InitialSpeed + 2f * Gravity * distance) - InitialSpeed) / Gravity
                         for (grain in stream.grains) {
@@ -169,6 +180,7 @@ internal fun FocusHourglass(
                         Size(w * .80f, h * .03f), CornerRadius(2.dp.toPx()))
                     drawLine(AppColors.Muted.copy(alpha = .24f), Offset(w*.14f, h*cap),
                         Offset(w*.86f, h*cap), edge / 2f, cap = StrokeCap.Round)
+                }
                 }
             }
         },

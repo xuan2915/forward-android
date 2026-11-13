@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -56,7 +57,7 @@ class MainActivity : ComponentActivity() {
   val apps = packageManager.queryIntentActivities(launch,0).filter { store.canRestrict(it.activityInfo.packageName) }.distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(packageManager).toString() }
   setContent {
     val debugPage = if (BuildConfig.DEBUG) intent.getIntExtra("debug_page",0) else 0
-    var page by remember { mutableIntStateOf(if(db.setting("import_draft").isNotBlank()) 5 else debugPage.coerceIn(0,5)) }; var editor by remember { mutableStateOf(false) };var dataVersion by remember {mutableIntStateOf(0)};var rewardHistoryExpanded by remember {mutableStateOf(false)};var rewardControlsExpanded by remember {mutableStateOf(false)};var selectedRewardRecord by remember { mutableStateOf<String?>(null) };var taskFilter by remember { mutableIntStateOf(0) }
+    var page by remember { mutableIntStateOf(if(db.setting("import_draft").isNotBlank()) 5 else debugPage.coerceIn(0,5)) }; var editor by remember { mutableStateOf(false) };var dataVersion by remember {mutableIntStateOf(0)};var showAllRewardHistory by remember {mutableStateOf(false)};var rewardControlsExpanded by remember {mutableStateOf(false)};var selectedRewardRecord by remember { mutableStateOf<String?>(null) };var taskFilter by remember { mutableIntStateOf(0) }
     var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }; var editingTaskId by remember { mutableStateOf<String?>(null) };var movingTask by remember { mutableStateOf<Task?>(null) };var deletingTask by remember { mutableStateOf<Task?>(null) };var allAchievements by remember { mutableStateOf(false) }; var newAchievement by remember { mutableStateOf(nextUnseenAchievement(db)) }; var gritAnalyticsTaskId by remember { mutableStateOf<String?>(null) }; var showContractDialog by remember { mutableStateOf(false) }; var dailyCardDate by remember { mutableStateOf<String?>(null) }; var dailyCardOpenDate by remember { mutableStateOf<String?>(null) }
     val taskActionScope = rememberCoroutineScope()
     fun dismissTaskActions() { movingTask=null; deletingTask=null }
@@ -130,18 +131,15 @@ class MainActivity : ComponentActivity() {
         item { Header("奖励与额度", "娱乐时间") }
         item { CardBlock {
          val video=db.rewardSnapshot("video");val games=db.rewardSnapshot("game")
-         Text(if(!protected) "应用保护未开启" else if(c.emergency) "今天已紧急解锁" else if(video.remaining>0) "保护已开启 · 额度可用" else if(tasks.any{it.required && !it.done && it.rewardMinutes>0}) "完成一项有视频奖励的必做任务即可增加额度" else if(tasks.any{it.required && it.done}) "视频额度已用完" else "暂无可用视频额度",color=if(video.remaining>0 && protected && !c.emergency) AppColors.Accent else AppColors.Muted,style=MaterialTheme.typography.labelMedium)
+         Text(if(!protected) "应用保护未开启" else if(c.emergency) "今天已紧急解锁" else if(video.remaining>0) "保护已开启 · 额度可用" else if(tasks.any{it.required && !it.done && it.rewardMinutes>0}) "必做任务奖励逐项到账" else if(tasks.any{it.required && it.done}) "视频额度已用完" else "暂无可用视频额度",color=if(video.remaining>0 && protected && !c.emergency) AppColors.Accent else AppColors.Muted,style=MaterialTheme.typography.labelMedium)
          Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
           Column(verticalArrangement=Arrangement.spacedBy(2.dp)) { Text("${video.remaining / 60000}",fontSize=38.sp,fontWeight=FontWeight.Light,lineHeight=42.sp,color=AppColors.Reward); Text("剩余分钟",color=AppColors.Muted,style=MaterialTheme.typography.bodySmall) }
           Column(horizontalAlignment=Alignment.End,verticalArrangement=Arrangement.spacedBy(2.dp)) { Text("${games.remaining}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Light); Text("剩余游戏局数",color=AppColors.Muted,style=MaterialTheme.typography.bodySmall) }
          }
          Hairline()
          Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {Text("已获得 ${video.earned/60000} 分钟",style=MaterialTheme.typography.labelMedium,color=AppColors.Muted);Text("已使用 ${video.used/60000} 分钟",style=MaterialTheme.typography.labelMedium,color=AppColors.Muted)}
-         if(video.used>0 || video.sleepDeducted>0 || video.expired>0) Text("已使用 ${video.used/60000} 分钟 · 睡眠扣减 ${video.sleepDeducted/60000} 分钟 · 已过期 ${video.expired/60000} 分钟",style=MaterialTheme.typography.labelSmall,color=AppColors.Muted)
-         if(video.reversed>0 || db.pendingSleepPenalty()>0) Text("任务奖励冲回 ${video.reversed/60000} 分钟 · 睡眠待抵扣 ${db.pendingSleepPenalty()/60000} 分钟",style=MaterialTheme.typography.labelSmall,color=AppColors.Muted)
-         if(games.earned>0 || games.used>0) Text("游戏额度：已获得 ${games.earned} 局 · 已使用 ${games.used} 局",style=MaterialTheme.typography.labelSmall,color=AppColors.Muted)
-         Text("抖音与 B 站共享视频额度 · 游戏局数手动记录",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
-         Text("任务每天 0 点更新 · 奖励额度 ${db.setting("boundary","4").padStart(2,'0')}:00 重置",style=MaterialTheme.typography.labelSmall,color=AppColors.Quiet)
+         if(video.sleepDeducted>0 || video.expired>0 || video.reversed>0 || db.pendingSleepPenalty()>0) Text("睡眠扣减 ${video.sleepDeducted/60000} · 已过期 ${video.expired/60000} · 冲回 ${video.reversed/60000} · 待抵扣 ${db.pendingSleepPenalty()/60000} 分钟",style=MaterialTheme.typography.labelSmall,color=AppColors.Muted)
+         Text("游戏已获 ${games.earned} 局 · 已用 ${games.used} 局 · 每日 00:00 更新，额度 ${db.setting("boundary","4").padStart(2,'0')}:00 结算",style=MaterialTheme.typography.labelSmall,color=AppColors.Quiet)
          if(games.remaining > 0) TextButton(onClick={db.consume("game",1); refresh++}) { Text("手动记录已使用一局") }
         } }
         items(tasks.filter{!it.required && it.done && !it.claimed},key={it.id}) { task -> CardBlock { Text("${task.title} · 领取一项奖励"); Row { if(task.rewardMinutes>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"video");refresh++}) {Text("${task.rewardMinutes} 分钟视频")}; if(task.rewardGames>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"game");refresh++}) {Text("${task.rewardGames} 局游戏") } }; if(!db.eligible()) Text("完成今日必做任务后可领取",color=AppColors.Muted) } }
@@ -153,11 +151,11 @@ class MainActivity : ComponentActivity() {
          TextButton(onClick={page=5}){Text("受限应用与权限")}
          TextButton(onClick={page=5}){Text("睡眠记录与规则")}
         } }
-        item { CardBlock { Text("奖励记录",style=MaterialTheme.typography.titleLarge); val records=db.rewardHistory(); if(records.isEmpty()) Text("奖励发放和使用记录会显示在这里",color=AppColors.Muted); (if(rewardHistoryExpanded) records else records.take(4)).forEach { record -> TextButton(onClick={selectedRewardRecord=record},contentPadding=PaddingValues(vertical=4.dp,horizontal=0.dp)) {Text(record,style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)} }; if(records.size>4) TextButton(onClick={rewardHistoryExpanded=!rewardHistoryExpanded}) { Text(if(rewardHistoryExpanded) "收起记录" else "查看全部 ${records.size} 条记录") } } }
+        item { CardBlock { Text("最近记录",style=MaterialTheme.typography.titleMedium); val records=db.rewardHistory(); if(records.isEmpty()) Text("奖励发放和使用会显示在这里",color=AppColors.Muted); records.take(3).forEach { record -> TextButton(onClick={selectedRewardRecord=record},contentPadding=PaddingValues(vertical=4.dp,horizontal=0.dp)) {Text(record,style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)} }; if(records.size>3) TextButton(onClick={showAllRewardHistory=true}) { Text("查看全部 ${records.size} 条记录") } } }
        }
        2 -> {
-        item { GrowthHero(db,refresh) }
-        item { GrowthDetails(db,refresh){allAchievements=true} }
+        item { GrowthHero(db,refresh){allAchievements=true;page=2} }
+        item { GrowthDetails(db,refresh,onAllAchievements={allAchievements=true},onHistoricalTask={task->taskDetailsId=task.id}) }
         if(dailyCardRecords.isNotEmpty()) item { DailyCardArchive(dailyCardRecords,db){DailyCards.markRevealSeen(db,it);dailyCardDate=it;refresh++} }
        }
        4 -> { item { FocusScreen(db,focusTimer,tasks,onTasks={page=0},onChanged={refresh++}) } }
@@ -192,6 +190,12 @@ class MainActivity : ComponentActivity() {
       }
      }
      selectedRewardRecord?.let { record -> AlertDialog(onDismissRequest={selectedRewardRecord=null},title={Text("奖励记录详情")},text={Text(record)},confirmButton={TextButton(onClick={selectedRewardRecord=null}){Text("完成")}}) }
+     if(showAllRewardHistory) AlertDialog(onDismissRequest={showAllRewardHistory=false},title={Text("奖励记录")},text={
+      val records=db.rewardHistory()
+      androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max=480.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+       items(records){record->TextButton(onClick={selectedRewardRecord=record;showAllRewardHistory=false},contentPadding=PaddingValues(vertical=6.dp,horizontal=0.dp)){Text(record,style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)} }
+      }
+     },confirmButton={TextButton(onClick={showAllRewardHistory=false}){Text("完成")}})
      dailyCardOpenDate?.let { date ->
       val record = dailyCardRecords.firstOrNull { it.date == date } ?: DailyCards.load(db,date)
       record?.let { DailyCardDialog(it,db,onEdit={DailyCards.markRevealSeen(db,date);dailyCardOpenDate=null;dailyCardDate=date;refresh++},onDismiss={DailyCards.markRevealSeen(db,date);dailyCardOpenDate=null;refresh++}) }
@@ -244,21 +248,45 @@ internal fun focusDuration(milliseconds:Long):String = when {
 }
 
 @Composable private fun TaskEditor(day:String,db:Database,onCancel:()->Unit,onSave:()->Unit) {
- var title by remember { mutableStateOf("") }; var required by remember { mutableStateOf(!db.contract(day).confirmed) }; var minutes by remember { mutableStateOf("25") }; var mode by remember { mutableStateOf("行动型") }; var checklist by remember { mutableStateOf("") }; var video by remember { mutableStateOf(if(!db.contract(day).confirmed) "10" else "20") }; var games by remember { mutableStateOf(if(!db.contract(day).confirmed) "0" else "1") }; var recurrence by remember { mutableStateOf("once") };var weekdays by remember{mutableStateOf(setOf(1,2,3,4,5))};var intervalDays by remember{mutableStateOf("3")}
+ var title by remember { mutableStateOf("") }; var required by remember { mutableStateOf(!db.contract(day).confirmed) }; var minutes by remember { mutableStateOf("25") }; var mode by remember { mutableStateOf("行动型") }; var checklist by remember { mutableStateOf("") }; var video by remember { mutableStateOf(if(!db.contract(day).confirmed) "10" else "20") }; var games by remember { mutableStateOf(if(!db.contract(day).confirmed) "0" else "1") }; var recurrence by remember { mutableStateOf("once") };var weekdays by remember{mutableStateOf(setOf(1,2,3,4,5))};var intervalDays by remember{mutableStateOf("3")};var repeatExpanded by remember{mutableStateOf(false)};var rewardsExpanded by remember{mutableStateOf(false)}
+ val repeatLabel=when {recurrence=="daily"->"每天";recurrence=="weekly"->"每周同日";recurrence.startsWith("days:")->"指定星期";recurrence.startsWith("interval:")->"每隔 ${intervalDays} 天";else->"仅此一次"}
  Header("PLAN / $day","添加任务")
  CardBlock {
-  OutlinedTextField(title,onValueChange={title=it},label={Text("任务名称")},modifier=Modifier.fillMaxWidth())
-  Row(verticalAlignment=Alignment.CenterVertically) { Checkbox(required,onCheckedChange={required=it;if(it){video="10";games="0"}else{video="20";games="1"}},enabled=!db.contract(day).confirmed); Text("必做") }
-  NumberField("目标分钟",minutes){minutes=it}
-  Text("验收类型"); Row { listOf("行动型","成果型","掌握型").forEach { TextButton(onClick={mode=it}) { Text(if(mode==it) "✓ $it" else it) } } }
-  OutlinedTextField(checklist,onValueChange={checklist=it},label={Text("预先约定的自检条件")},modifier=Modifier.fillMaxWidth())
-  Text("重复："); Row { listOf("once" to "一次", "daily" to "每天", "weekly" to "每周同日").forEach { (v,label) -> TextButton(onClick={recurrence=v}) { Text(if(recurrence==v) "✓$label" else label) } } }
-  TextButton(onClick={recurrence="days:"+weekdays.sorted().joinToString(",")}){Text(if(recurrence.startsWith("days:")) "✓ 指定星期" else "指定星期")}
-  if(recurrence.startsWith("days:"))Row(Modifier.fillMaxWidth()){(1..7).forEach {dayOfWeek->FilterChip(selected=dayOfWeek in weekdays,onClick={weekdays=if(dayOfWeek in weekdays)weekdays-dayOfWeek else weekdays+dayOfWeek;recurrence="days:"+weekdays.sorted().joinToString(",")},label={Text(listOf("一","二","三","四","五","六","日")[dayOfWeek-1])},modifier=Modifier.weight(1f))}}
-  TextButton(onClick={recurrence="interval:${intervalDays.toIntOrNull()?.coerceIn(1,365)?:3}"}){Text(if(recurrence.startsWith("interval:")) "✓ 自定义间隔" else "自定义间隔")}
-  if(recurrence.startsWith("interval:")){NumberField("每隔几天（1–365）",intervalDays){intervalDays=it;recurrence="interval:${it.toIntOrNull()?.coerceIn(1,365)?:1}"};Text("按开始日期和间隔生成",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)}
-  Text(if(required) "完成后自动发放奖励" else "选做完成后领取一项奖励"); NumberField("视频分钟",video){video=it}; NumberField("游戏局数",games){games=it}
-  Row { Button(enabled=title.isNotBlank() && recurrence!="days:" && (!recurrence.startsWith("interval:") || (intervalDays.toIntOrNull()?:0) in 1..365) && (!db.contract(day).confirmed || !required),onClick={ db.addTask(day,title,required,minutes.toIntOrNull()?:0,mode,checklist,video.toIntOrNull()?:0,games.toIntOrNull()?:0,recurrence); onSave() }) {Text("保存")}; TextButton(onClick=onCancel){Text("取消")} }
+  Text("基础信息",style=MaterialTheme.typography.titleMedium)
+  OutlinedTextField(title,onValueChange={title=it},label={Text("任务名称")},modifier=Modifier.fillMaxWidth(),singleLine=true)
+  Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+   FilterChip(selected=required,onClick={if(!db.contract(day).confirmed){required=true;video="10";games="0"}},label={Text("必做")},enabled=!db.contract(day).confirmed)
+   FilterChip(selected=!required,onClick={required=false;video="20";games="1"},label={Text("选做")})
+  }
+  NumberField("目标专注分钟",minutes){minutes=it}
+  androidx.compose.material3.HorizontalDivider(color=AppColors.Border)
+  Text("验收要求",style=MaterialTheme.typography.titleMedium)
+  Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)) { listOf("行动型","成果型","掌握型").forEach { type -> FilterChip(selected=mode==type,onClick={mode=type},label={Text(type)},modifier=Modifier.weight(1f)) } }
+  OutlinedTextField(checklist,onValueChange={checklist=it},label={Text(when(mode){"成果型"->"成果验收条件";"掌握型"->"独立掌握标准";else->"完成后自检条件"})},modifier=Modifier.fillMaxWidth(),minLines=1,maxLines=3)
+  androidx.compose.material3.HorizontalDivider(color=AppColors.Border)
+  TextButton(onClick={repeatExpanded=!repeatExpanded},modifier=Modifier.fillMaxWidth()) { Text("重复计划 · $repeatLabel${if(repeatExpanded)"  −" else "  +"}") }
+  AnimatedVisibility(repeatExpanded) {
+   Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+     listOf("once" to "一次","daily" to "每天","weekly" to "每周").forEach{(value,label)->FilterChip(selected=recurrence==value,onClick={recurrence=value},label={Text(label)},modifier=Modifier.weight(1f))}
+    }
+    FilterChip(selected=recurrence.startsWith("days:"),onClick={recurrence="days:"+weekdays.sorted().joinToString(",")},label={Text("指定星期")})
+    if(recurrence.startsWith("days:"))Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(2.dp)){(1..7).forEach {d->FilterChip(selected=d in weekdays,onClick={weekdays=if(d in weekdays)weekdays-d else weekdays+d;recurrence="days:"+weekdays.sorted().joinToString(",")},label={Text(listOf("一","二","三","四","五","六","日")[d-1])},modifier=Modifier.weight(1f))}}
+    Row(verticalAlignment=Alignment.CenterVertically) { FilterChip(selected=recurrence.startsWith("interval:"),onClick={recurrence="interval:${intervalDays.toIntOrNull()?.coerceIn(1,365)?:3}"},label={Text("自定义间隔")});if(recurrence.startsWith("interval:")){Spacer(Modifier.width(8.dp));NumberField("间隔天数",intervalDays){intervalDays=it;recurrence="interval:${it.toIntOrNull()?.coerceIn(1,365)?:1}"}} }
+   }
+  }
+  TextButton(onClick={rewardsExpanded=!rewardsExpanded},modifier=Modifier.fillMaxWidth()) { Text("奖励设置 · 视频 $video 分钟，游戏 $games 局${if(rewardsExpanded)"  −" else "  +"}") }
+  AnimatedVisibility(rewardsExpanded) {
+   Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
+    Text(if(required)"必做任务完成后发放" else "选做任务完成后可选领取",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
+    NumberField("视频分钟",video){video=it}
+    NumberField("游戏局数",games){games=it}
+   }
+  }
+  Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+   Button(enabled=title.isNotBlank() && recurrence!="days:" && (!recurrence.startsWith("interval:") || (intervalDays.toIntOrNull()?:0) in 1..365) && (!db.contract(day).confirmed || !required),onClick={ db.addTask(day,title,required,minutes.toIntOrNull()?:0,mode,checklist,video.toIntOrNull()?:0,games.toIntOrNull()?:0,recurrence); onSave() },modifier=Modifier.weight(1f).heightIn(min=48.dp)) {Text("保存任务")}
+   TextButton(onClick=onCancel,modifier=Modifier.heightIn(min=48.dp)){Text("取消")}
+  }
  }
 }
 

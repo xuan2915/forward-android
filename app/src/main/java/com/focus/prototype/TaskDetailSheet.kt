@@ -127,6 +127,13 @@ fun TaskDetailSheet(
                 }, active = task.done || active)
             }
 
+            if(!task.done && task.date<db.day()) Text("历史任务 · 计划日 ${task.date} · 补记仍需满足原验收条件",style=MaterialTheme.typography.bodySmall,color=AppColors.Accent)
+            if(task.done&&task.completedAt>0L) {
+                val completedAt=java.time.Instant.ofEpochMilli(task.completedAt).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime()
+                val crossDay=completedAt.toLocalDate().toString()!=task.date
+                Text("${if(crossDay)"跨日补记" else "实际完成"} · ${completedAt.year}年${completedAt.monthValue}月${completedAt.dayOfMonth}日 ${completedAt.toLocalTime().toString().take(5)}",style=MaterialTheme.typography.bodySmall,color=if(crossDay)AppColors.Accent else AppColors.Muted)
+            }
+
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(if (task.minutes > 0) "${focusDuration(elapsed)} / ${task.minutes} 分钟" else focusDuration(elapsed), style = MaterialTheme.typography.titleMedium)
@@ -212,7 +219,7 @@ fun TaskDetailSheet(
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             checking = false
                             onChanged()
-                        }, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("确认完成任务") }
+                        }, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(if(task.date<db.day())"确认补记完成" else "确认完成任务") }
                         Text(
                             when {
                                 elapsed < task.minutes * 60_000L -> "还需专注 ${focusDuration((task.minutes * 60_000L - elapsed).coerceAtLeast(0))}"

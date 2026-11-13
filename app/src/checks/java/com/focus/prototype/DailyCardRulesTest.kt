@@ -42,8 +42,10 @@ class DailyCardRulesTest {
         assertFalse(dailyCardQualifies(emptyList()))
     }
 
-    @Test fun completedOptionalOnlyDayCreatesCard() {
-        assertTrue(dailyCardQualifies(listOf(task(required = false, done = true))))
+    @Test fun completedOptionalOnlyDayDoesNotCreateCardOrCountAsGoal() {
+        val optional=listOf(task(required = false, done = true))
+        assertFalse(dailyCardQualifies(optional))
+        assertEquals(DailyGoalState.NO_REQUIRED_TASKS,dailyGoalState(optional,false,"2026-11-10","2026-11-10"))
     }
 
     @Test fun everyRequiredTaskMustBeComplete() {
@@ -54,8 +56,10 @@ class DailyCardRulesTest {
         assertFalse(dailyCardQualifies(listOf(task(required = true, done = false))))
     }
 
-    @Test fun unfinishedOptionalTaskBlocksCard() {
-        assertFalse(dailyCardQualifies(listOf(task(required = true, done = true), task(required = false, done = false))))
+    @Test fun unfinishedOptionalTaskDoesNotBlockDailyGoalOrCard() {
+        val tasks=listOf(task(required = true, done = true), task(required = false, done = false))
+        assertTrue(dailyCardQualifies(tasks))
+        assertEquals(DailyGoalState.ACHIEVED,dailyGoalState(tasks,false,"2026-11-10","2026-11-10"))
     }
 
     @Test fun singleCompletedTaskCreatesCard() {
@@ -66,7 +70,24 @@ class DailyCardRulesTest {
         val required = task(required = true, done = true)
         val optional = task(required = false, done = true)
         assertTrue(dailyCardQualifies(listOf(required, optional)))
-        assertFalse(dailyCardQualifies(listOf(required, optional.copy(done = false))))
+        assertTrue(dailyCardQualifies(listOf(required, optional.copy(done = false))))
+    }
+
+    @Test fun optionalCompletionCannotReplaceIncompleteRequiredTask() {
+        val tasks=listOf(task(required=true,done=false),task(required=false,done=true))
+        assertFalse(dailyCardQualifies(tasks))
+        assertEquals(DailyGoalState.IN_PROGRESS,dailyGoalState(tasks,false,"2026-11-10","2026-11-10"))
+        assertEquals(DailyGoalState.MISSED,dailyGoalState(tasks,false,"2026-11-10","2026-11-11"))
+    }
+
+    @Test fun restAndUnplannedDaysAreNotSuccessOrFailure() {
+        assertEquals(DailyGoalState.REST,dailyGoalState(emptyList(),true,"2026-11-10","2026-11-10"))
+        assertEquals(DailyGoalState.UNPLANNED,dailyGoalState(emptyList(),false,"2026-11-10","2026-11-10"))
+    }
+
+    @Test fun futureDatesStayFutureEvenWhenNoRequiredTasksExist() {
+        assertEquals(DailyGoalState.FUTURE,dailyGoalState(emptyList(),false,"2026-11-11","2026-11-10"))
+        assertEquals(DailyGoalState.FUTURE,dailyGoalState(listOf(task(required=false,done=false)),false,"2026-11-11","2026-11-10"))
     }
 
     private fun task(required: Boolean, done: Boolean) = Task(

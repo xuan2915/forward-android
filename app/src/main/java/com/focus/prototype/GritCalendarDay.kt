@@ -35,9 +35,9 @@ enum class StreakPosition { ISOLATED, START, MIDDLE, END }
  val position=when {before&&after->StreakPosition.MIDDLE;before->StreakPosition.END;after->StreakPosition.START;else->StreakPosition.ISOLATED}
  val shape=calendarMapStreakShape(position,day.date.dayOfWeek.value==1,day.date.dayOfWeek.value==7,day.date.dayOfMonth==1,day.date.plusDays(1).dayOfMonth==1)
  val state=history[day.date.toString()]
- val color=when {done->AppColors.Accent;state=="休息"->AppColors.Border;state=="未完成"->AppColors.Missed;else->MaterialTheme.colorScheme.surfaceContainer}
+ val color=when {done->AppColors.Accent;state=="休息"->AppColors.Border;state=="未完成"->AppColors.Missed;state=="无必做"->MaterialTheme.colorScheme.surfaceContainerHigh;state=="进行中"->MaterialTheme.colorScheme.primary.copy(alpha=.16f);else->MaterialTheme.colorScheme.surfaceContainer}
  Box(Modifier.padding(vertical=1.dp).fillMaxWidth().height(40.dp).clip(shape).background(color).then(if(day.date==selected) Modifier.border(1.dp,MaterialTheme.colorScheme.primary,shape) else Modifier).clickable {onSelected(day.date)},contentAlignment=Alignment.Center) {
-  Text(day.date.dayOfMonth.toString(),style=MaterialTheme.typography.bodyLarge,color=when {done->AppColors.AccentInk;state=="未完成"->AppColors.MissedInk;state=="休息"->AppColors.Muted;day.date>today->AppColors.Muted.copy(alpha=.55f);else->AppColors.Text})
+  Text(day.date.dayOfMonth.toString(),style=MaterialTheme.typography.bodyLarge,color=when {done->AppColors.AccentInk;state=="未完成"->AppColors.MissedInk;state=="休息"||state=="无必做"->AppColors.Muted;day.date>today->AppColors.Muted.copy(alpha=.55f);else->AppColors.Text})
  }
 }
 fun calendarMapStreakShape(

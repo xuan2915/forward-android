@@ -1,6 +1,24 @@
 package com.focus.prototype
 import java.time.LocalDate
 import java.time.LocalDateTime
+
+enum class DailyGoalState { ACHIEVED, MISSED, REST, NO_REQUIRED_TASKS, UNPLANNED, IN_PROGRESS, FUTURE }
+
+fun requiredGoalAchieved(tasks: List<Task>, restDay: Boolean = false): Boolean {
+ val required = tasks.filter { it.required }
+ return !restDay && required.isNotEmpty() && required.all { it.done }
+}
+
+fun dailyGoalState(tasks: List<Task>, restDay: Boolean, date: String, today: String): DailyGoalState = when {
+  restDay -> DailyGoalState.REST
+  date > today -> DailyGoalState.FUTURE
+  tasks.isEmpty() -> DailyGoalState.UNPLANNED
+  tasks.none { it.required } -> DailyGoalState.NO_REQUIRED_TASKS
+  requiredGoalAchieved(tasks) -> DailyGoalState.ACHIEVED
+  date < today -> DailyGoalState.MISSED
+  else -> DailyGoalState.IN_PROGRESS
+ }
+
 object Rules {
  fun day(now:LocalDateTime,hour:Int):String = now.minusHours(hour.toLong()).toLocalDate().toString()
  fun repeats(rule:String, origin:String, day:String):Boolean = when {

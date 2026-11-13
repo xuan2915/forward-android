@@ -46,7 +46,7 @@ private data class AuditEntry(val date: String, val detail: String)
 private enum class GrowthSection(val label: String) { CALENDAR("日历"), TREND("趋势"), MILESTONES("里程碑") }
 
 @Composable
-fun GrowthDetails(db: Database, refreshKey: Int = 0, onAllAchievements: () -> Unit = {}) {
+fun GrowthDetails(db: Database, refreshKey: Int = 0, onAllAchievements: () -> Unit = {}, onHistoricalTask:(Task)->Unit = {}) {
     val today = LocalDate.parse(db.day())
     val history = db.history().toMap()
     var selectedDate by remember(today) { mutableStateOf(today) }
@@ -72,6 +72,7 @@ fun GrowthDetails(db: Database, refreshKey: Int = 0, onAllAchievements: () -> Un
             CalendarLegend(AppColors.Accent, "完成")
             CalendarLegend(AppColors.Border, "休息")
             CalendarLegend(AppColors.Missed, "未完成")
+            CalendarLegend(MaterialTheme.colorScheme.surfaceContainerHigh, "无必做")
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -102,7 +103,7 @@ fun GrowthDetails(db: Database, refreshKey: Int = 0, onAllAchievements: () -> Un
             label = "growth-section",
         ) { visibleSection ->
             when (visibleSection) {
-                GrowthSection.CALENDAR -> CalendarSection(db, today, history, selectedDate, calendarState, scope, refreshKey) { selectedDate = it }
+                GrowthSection.CALENDAR -> CalendarSection(db, today, history, selectedDate, calendarState, scope, refreshKey, { selectedDate = it }, onHistoricalTask)
                 GrowthSection.TREND -> TrendSection(db, today)
                 GrowthSection.MILESTONES -> MilestoneSection(db, refreshKey, onAllAchievements)
             }
@@ -120,6 +121,7 @@ private fun CalendarSection(
     scope: kotlinx.coroutines.CoroutineScope,
     refreshKey: Int,
     onDateSelected: (LocalDate) -> Unit,
+    onHistoricalTask:(Task)->Unit,
 ) {
     val visibleMonth = calendarState.firstVisibleMonth.yearMonth
     val monthDays = (1..visibleMonth.lengthOfMonth()).map { visibleMonth.atDay(it) }
@@ -154,8 +156,8 @@ private fun CalendarSection(
                     Text(completed.toString(), fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("本月完成", style = MaterialTheme.typography.labelMedium, color = AppColors.Muted)
-                    Text("$completed 天完成 · $rested 天休息", style = MaterialTheme.typography.bodySmall)
+                    Text("本月必做达标", style = MaterialTheme.typography.labelMedium, color = AppColors.Muted)
+                    Text("$completed 天达标 · $rested 天休息", style = MaterialTheme.typography.bodySmall)
                     Text("$missed 天未完成", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
                 }
             }
@@ -187,7 +189,7 @@ private fun CalendarSection(
             val selectedState = history[visibleDate.toString()]
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 GritAnalyticsHeader("${visibleDate.monthValue}月${visibleDate.dayOfMonth}日", icon = R.drawable.grit_analytics) {
-                    StatusPill(selectedState ?: "未记录", active = selectedState == "完成")
+                    StatusPill(selectedState ?: "未安排", active = selectedState == "完成")
                 }
                 QuietSurface {
                     val selectedTasks = db.tasks(visibleDate.toString())
@@ -198,9 +200,14 @@ private fun CalendarSection(
                             CompletionMark(task.done)
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(task.title, style = MaterialTheme.typography.bodyMedium, color = AppColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Text(if (task.minutes > 0) "${focusDuration(db.elapsed(task))} / 目标 ${task.minutes} 分钟" else "专注 ${focusDuration(db.elapsed(task))}", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
+                                val completedAt=task.completedAt.takeIf { task.done && it>0L }?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime() }
+                                val completionNote=completedAt?.let { actual -> if(actual.toLocalDate().toString()!=task.date) "跨日补记 · 实际完成 ${actual.monthValue}月${actual.dayOfMonth}日 ${actual.toLocalTime().toString().take(5)}" else "完成于 ${actual.toLocalTime().toString().take(5)}" }
+                                Text(buildString { append(if (task.minutes > 0) "${focusDuration(db.elapsed(task))} / 目标 ${task.minutes} 分钟" else "专注 ${focusDuration(db.elapsed(task))}");if(completionNote!=null)append(" · $completionNote") }, style = MaterialTheme.typography.labelSmall, color = if(completionNote?.startsWith("跨日")==true)AppColors.Accent else AppColors.Muted, maxLines=2, overflow=TextOverflow.Ellipsis)
                             }
-                            Text(if (task.done) "完成" else "未完成", style = MaterialTheme.typography.labelSmall, color = if (task.done) AppColors.Accent else AppColors.Muted)
+                            Column(horizontalAlignment=Alignment.End,verticalArrangement=Arrangement.spacedBy(2.dp)) {
+                                Text(if (task.done) "完成" else "未完成", style = MaterialTheme.typography.labelSmall, color = if (task.done) AppColors.Accent else AppColors.Muted)
+                                if(!visibleDate.isAfter(today))TextButton(onClick={onHistoricalTask(task)},contentPadding=PaddingValues(0.dp)) { Text(if(task.done)"详情" else if(visibleDate.isBefore(today))"补记" else "查看",style=MaterialTheme.typography.labelSmall) }
+                            }
                         }
                         if (index < selectedTasks.lastIndex) Hairline()
                     }
@@ -357,7 +364,7 @@ private data class TaskStats(val completed: Int, val total: Int, val focusMinute
 
 private fun taskStats(db: Database, from: LocalDate, to: LocalDate): TaskStats =
     db.readableDatabase.rawQuery(
-        "SELECT COUNT(*),COALESCE(SUM(done),0),COALESCE(SUM(elapsed),0) FROM tasks WHERE day>=? AND day<=?",
+        "SELECT COUNT(*),COALESCE(SUM(done),0),COALESCE(SUM(elapsed),0) FROM tasks WHERE day>=? AND day<=? AND id NOT IN (SELECT source_id FROM task_moves)",
         arrayOf(from.toString(), to.toString()),
     ).use { cursor ->
         cursor.moveToFirst()
