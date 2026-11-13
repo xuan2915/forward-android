@@ -57,26 +57,30 @@ class MainActivity : ComponentActivity() {
   setContent {
     val debugPage = if (BuildConfig.DEBUG) intent.getIntExtra("debug_page",0) else 0
     var page by remember { mutableIntStateOf(if(db.setting("import_draft").isNotBlank()) 5 else debugPage.coerceIn(0,5)) }; var editor by remember { mutableStateOf(false) };var dataVersion by remember {mutableIntStateOf(0)};var rewardHistoryExpanded by remember {mutableStateOf(false)};var rewardControlsExpanded by remember {mutableStateOf(false)};var selectedRewardRecord by remember { mutableStateOf<String?>(null) };var taskFilter by remember { mutableIntStateOf(0) }
-    var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }; var editingTaskId by remember { mutableStateOf<String?>(null) };var movingTask by remember { mutableStateOf<Task?>(null) };var deletingTask by remember { mutableStateOf<Task?>(null) };var allAchievements by remember { mutableStateOf(false) }; var newAchievement by remember { mutableStateOf(nextUnseenAchievement(db)) }; var gritAnalyticsTaskId by remember { mutableStateOf<String?>(null) }; var showContractDialog by remember { mutableStateOf(false) }
+    var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }; var editingTaskId by remember { mutableStateOf<String?>(null) };var movingTask by remember { mutableStateOf<Task?>(null) };var deletingTask by remember { mutableStateOf<Task?>(null) };var allAchievements by remember { mutableStateOf(false) }; var newAchievement by remember { mutableStateOf(nextUnseenAchievement(db)) }; var gritAnalyticsTaskId by remember { mutableStateOf<String?>(null) }; var showContractDialog by remember { mutableStateOf(false) }; var dailyCardDate by remember { mutableStateOf<String?>(null) }; var dailyCardOpenDate by remember { mutableStateOf<String?>(null) }
     val taskActionScope = rememberCoroutineScope()
     fun dismissTaskActions() { movingTask=null; deletingTask=null }
    LaunchedEffect(shareVersion) { if(shareVersion>0) { page=5;editor=false } }
    LaunchedEffect(Unit) { while(true) { db.settleToday();focusTimer.advance();if(now%10L==0L)db.checkpoint();now++; delay(1000) } }
    val tick = now + refresh; val today = db.day(); val c = remember(today,tick) { db.contract(today) }; val tasks = remember(today,refresh) { db.tasks(today) }; val continuing = remember(today,refresh) { db.runningTasks().filter { it.date != today } }
    var dailyCardRecords by remember { mutableStateOf(emptyList<DailyCardRecord>()) }
-   LaunchedEffect(today,refresh) { dailyCardRecords = DailyCards.reconcileAll(db,today) }
+   LaunchedEffect(today,refresh,taskDetailsId) {
+    val reconciled = DailyCards.reconcileAll(db,today)
+    dailyCardRecords = reconciled
+    if (taskDetailsId == null && reconciled.any { it.date == today && !it.revealSeen }) dailyCardOpenDate = today
+   }
    val protected = remember(tick) { val id = ComponentName(this,FocusService::class.java).flattenToString(); FocusService.connected && Settings.Secure.getString(contentResolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)?.split(':')?.any { it.equals(id,true) } == true }
    LaunchedEffect(refresh) { if (newAchievement == null) newAchievement = nextUnseenAchievement(db) }
-   FocusTheme { MotionHost(db.xp(),showToast=page!=2 && taskDetailsId==null && newAchievement==null) {
-       androidx.activity.compose.BackHandler(enabled=allAchievements || gritAnalyticsTaskId!=null || page==5 || editor || showContractDialog) {
-        when { showContractDialog -> showContractDialog=false; allAchievements -> allAchievements=false; gritAnalyticsTaskId!=null -> gritAnalyticsTaskId=null; editor -> editor=false; else -> page=0 }
+   FocusTheme { MotionHost(db.xp(),showToast=page!=2 && taskDetailsId==null && newAchievement==null && dailyCardOpenDate==null && dailyCardDate==null) {
+       androidx.activity.compose.BackHandler(enabled=allAchievements || gritAnalyticsTaskId!=null || page==5 || editor || showContractDialog || dailyCardOpenDate!=null || dailyCardDate!=null) {
+        when { dailyCardOpenDate!=null -> {DailyCards.markRevealSeen(db,dailyCardOpenDate!!);dailyCardOpenDate=null;refresh++}; dailyCardDate!=null -> dailyCardDate=null; showContractDialog -> showContractDialog=false; allAchievements -> allAchievements=false; gritAnalyticsTaskId!=null -> gritAnalyticsTaskId=null; editor -> editor=false; else -> page=0 }
        }
      Scaffold(containerColor=AppColors.Background, bottomBar = { if(taskDetailsId==null && gritAnalyticsTaskId==null && !allAchievements && page!=5) AppNavigation(page){page=it;editor=false;gritAnalyticsTaskId=null;allAchievements=false;dismissTaskActions();showContractDialog=false} }) { pad ->
      Box(Modifier.fillMaxSize()) {
       AnimatedContent(targetState=page,transitionSpec={fadeIn(tween(AppMotion.Standard))+slideInHorizontally(tween(AppMotion.Standard)){it/28} togetherWith fadeOut(tween(AppMotion.Short))+slideOutHorizontally(tween(AppMotion.Short)){ -it/36 }},label="page-transition") { screen ->
       if (!editor && screen == 0) {
        GritTaskListPage(
-        modifier=Modifier.fillMaxSize().padding(pad), date=today, tasks=tasks,
+        modifier=Modifier.fillMaxSize().padding(pad), db=db, date=today, tasks=tasks,
         dailyCard=dailyCardRecords.firstOrNull { it.date == today },
         continuing=continuing, filter=taskFilter,
         confirmed=c.confirmed,
@@ -86,6 +90,7 @@ class MainActivity : ComponentActivity() {
         onEdit={editingTaskId=it.id;taskDetailsId=it.id},
         onMove={task->taskActionScope.launch { delay(200); movingTask=task }},
         onDelete={task->taskActionScope.launch { delay(200); deletingTask=task }},
+        onEditDailyCard={date->DailyCards.markRevealSeen(db,date);dailyCardDate=date;refresh++},
        )
       } else if (!editor && screen == 2 && allAchievements) {
        AchievementsPage(db,refresh){allAchievements=false}
@@ -153,7 +158,7 @@ class MainActivity : ComponentActivity() {
        2 -> {
         item { GrowthHero(db,refresh) }
         item { GrowthDetails(db,refresh){allAchievements=true} }
-        if(dailyCardRecords.isNotEmpty()) item { DailyCardArchive(dailyCardRecords) }
+        if(dailyCardRecords.isNotEmpty()) item { DailyCardArchive(dailyCardRecords,db){DailyCards.markRevealSeen(db,it);dailyCardDate=it;refresh++} }
        }
        4 -> { item { FocusScreen(db,focusTimer,tasks,onTasks={page=0},onChanged={refresh++}) } }
        5 -> {
@@ -187,6 +192,11 @@ class MainActivity : ComponentActivity() {
       }
      }
      selectedRewardRecord?.let { record -> AlertDialog(onDismissRequest={selectedRewardRecord=null},title={Text("奖励记录详情")},text={Text(record)},confirmButton={TextButton(onClick={selectedRewardRecord=null}){Text("完成")}}) }
+     dailyCardOpenDate?.let { date ->
+      val record = dailyCardRecords.firstOrNull { it.date == date } ?: DailyCards.load(db,date)
+      record?.let { DailyCardDialog(it,db,onEdit={DailyCards.markRevealSeen(db,date);dailyCardOpenDate=null;dailyCardDate=date;refresh++},onDismiss={DailyCards.markRevealSeen(db,date);dailyCardOpenDate=null;refresh++}) }
+     }
+     dailyCardDate?.let { date -> DailyCardEditor(db,date,db.tasks(date),onDismiss={dailyCardDate=null},onSaved={dailyCardDate=null;refresh++}) }
      movingTask?.let { task -> TaskMoveDialog(task,db,onDismiss={movingTask=null},onMoved={if(focusTimer.taskId==task.id)focusTimer.finish();movingTask=null;refresh++}) }
      deletingTask?.let { task -> TaskDeleteDialog(task,db,onDismiss={deletingTask=null},onDeleted={deletingTask=null;refresh++}) }
      val detailTask = remember(taskDetailsId,tick) { taskDetailsId?.let(db::task) }
@@ -197,7 +207,7 @@ class MainActivity : ComponentActivity() {
       onDismiss={taskDetailsId=null;editingTaskId=null}, onFocus={taskDetailsId=null;editingTaskId=null;page=4}, onChanged={refresh++},
       onAnalytics={taskDetailsId=null;editingTaskId=null;gritAnalyticsTaskId=detailTask.id;page=2},
       )
-     newAchievement?.takeIf { taskDetailsId == null }?.let { achievement ->
+     newAchievement?.takeIf { taskDetailsId == null && dailyCardOpenDate==null && dailyCardDate==null }?.let { achievement ->
       fun acknowledgeAchievement(openAll:Boolean) {
        db.setSetting("achievement_seen_${achievement.id}","true")
        newAchievement=null

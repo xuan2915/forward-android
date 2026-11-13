@@ -1,18 +1,21 @@
 package com.focus.prototype
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DailyCardRulesTest {
-    @Test fun editionsUseStableKeysAndRouteLongQuotesToPaper() {
+    @Test fun automaticCompositionIsStableAndPairsExcerptThemeWithOfflineArtwork() {
         assertTrue(CardEdition.fromKey("sky-meadow-v1") == CardEdition.Sky)
         assertTrue(CardEdition.fromKey("sky-meadow-v1").artwork == R.drawable.daily_rain_harbor)
         assertTrue(CardEdition.fromKey("paper-terrace-v1").artwork == R.drawable.daily_blue_window)
         assertTrue(CardEdition.fromKey("legacy-v1").artwork == R.drawable.daily_blue_window)
         assertTrue(CardEdition.fromKey("") == CardEdition.Legacy)
-        assertTrue(cardEdition("长".repeat(42), 3) == CardEdition.Paper)
-        assertTrue(cardEdition("短句", 3) == CardEdition.Sky)
+        val first = dailyCardComposition("2026-11-12")
+        assertEquals(first, dailyCardComposition("2026-11-12"))
+        assertTrue(first.excerpt in DailyExcerpts.entries)
+        assertTrue(first.edition in listOf(CardEdition.Sky, CardEdition.Paper))
     }
 
     @Test fun catalogHasDistinctIdsAndSourceMetadata() {

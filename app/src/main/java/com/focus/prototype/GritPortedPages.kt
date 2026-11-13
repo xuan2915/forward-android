@@ -109,6 +109,7 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun GritTaskListPage(
     modifier: Modifier = Modifier,
+    db: Database,
     date: String,
     tasks: List<Task>,
     dailyCard: DailyCardRecord?,
@@ -123,6 +124,7 @@ internal fun GritTaskListPage(
     onEdit: (Task) -> Unit,
     onMove: (Task) -> Unit,
     onDelete: (Task) -> Unit,
+    onEditDailyCard: (String) -> Unit,
 ) {
     val completed = tasks.count(Task::done)
     val filteredTasks = when (filter) {
@@ -206,18 +208,16 @@ internal fun GritTaskListPage(
                         GritTaskListCard(task, gritTaskShape(index, filteredTasks.size), onDetails, onEdit, onMove, onDelete)
                     }
                 }
-                dailyCard?.let { record ->
-                    item(key = "daily-card-${record.date}") { DailyCardReveal(record) }
+                if (dailyCardQualifies(tasks)) {
+                    dailyCard?.let { record -> item(key = "daily-card-${record.date}") { DailyCardReveal(record, db, onEditDailyCard) } }
                 }
             }
-            if (dailyCard == null) {
-                androidx.compose.material3.FloatingActionButton(
-                    onClick = onAdd,
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
-                    shape = MaterialTheme.shapes.large,
-                ) {
-                    Icon(painterResource(R.drawable.grit_add), contentDescription = "添加任务")
-                }
+            androidx.compose.material3.FloatingActionButton(
+                onClick = onAdd,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
+                shape = MaterialTheme.shapes.large,
+            ) {
+                Icon(painterResource(R.drawable.grit_add), contentDescription = "添加任务")
             }
         }
     }
