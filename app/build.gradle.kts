@@ -3,7 +3,7 @@ android {
  namespace = "com.focus.prototype"
  compileSdk = 35
  buildToolsVersion = "35.0.0"
-    defaultConfig { applicationId = "com.focus.prototype"; minSdk = 26; targetSdk = 35; versionCode = 35; versionName = "0.10.8" }
+    defaultConfig { applicationId = "com.focus.prototype"; minSdk = 26; targetSdk = 35; versionCode = 36; versionName = "0.10.9" }
  defaultConfig { testInstrumentationRunner = "com.focus.prototype.BusinessChecks" }
  buildFeatures { compose = true;buildConfig = true }
  testOptions { unitTests.isIncludeAndroidResources = true }
@@ -20,5 +20,4 @@ dependencies {
  implementation("com.materialkolor:material-kolor:1.7.1")
  implementation("com.kizitonwose.calendar:compose:2.6.1")
  implementation("com.patrykandpatrick.vico:compose-m3:1.16.0")
- implementation("androidx.health.connect:connect-client:1.1.0-alpha11")
 }

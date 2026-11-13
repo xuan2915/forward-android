@@ -28,7 +28,7 @@ internal data class BackupPreview(
 object Backup {
     private const val FORMAT = "xiangqian-local-backup"
     private const val CURRENT_VERSION = 5
-    private val tables = listOf("contracts", "tasks", "task_moves", "ledger", "reviews", "audit", "settings", "templates", "attachments")
+    private val tables = listOf("contracts", "tasks", "task_moves", "ledger", "reviews", "audit", "settings", "templates", "attachments", "night_violations")
     private val requiredTables = listOf("contracts", "tasks", "ledger", "reviews", "audit", "settings")
 
     private data class Asset(val key: String, val name: String, val bytes: ByteArray)
@@ -181,6 +181,19 @@ object Backup {
                             "attachments" -> {
                                 val oldPath = values.getAsString("path").orEmpty()
                                 values.put("path", restoredPaths[oldPath] ?: error("附件文件缺失：${File(oldPath).name}"))
+                            }
+                            "night_violations" -> if (!row.has("reward_kind")) {
+                                val minutes = values.getAsInteger("reserved_minutes") ?: 0
+                                values.put("reward_kind", "video")
+                                values.put("reserved_amount", minutes * 60_000L)
+                            }
+                            "settings" -> {
+                                val key = values.getAsString("key").orEmpty()
+                                if (key.matches(Regex("night_pending_\\d{4}-\\d{2}-\\d{2}"))) {
+                                    values.put("key", key.replaceFirst("night_pending_", "night_pending_video_"))
+                                } else if (key.matches(Regex("night_reserved_\\d{4}-\\d{2}-\\d{2}"))) {
+                                    values.put("key", key.replaceFirst("night_reserved_", "night_reserved_video_"))
+                                }
                             }
                         }
                         sql.insertOrThrow(table, null, values)

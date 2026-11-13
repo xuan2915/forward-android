@@ -53,7 +53,7 @@ class MainActivity : ComponentActivity() {
   return text.isNotBlank()
  }
  override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); if(receiveText(intent)) shareVersion++; refresh++ }
- override fun onResume() { super.onResume(); refresh++ }
+ override fun onResume() { super.onResume(); refresh++;runCatching { Database(this).use { NightWrapUpScheduler.reschedule(this,it) } } }
  override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState)
   val initialNavigation = resolveInitialNavigation(
    action = intent.action,
@@ -147,6 +147,8 @@ class MainActivity : ComponentActivity() {
          Hairline()
          Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {Text("已获得 ${video.earned/60000} 分钟",style=MaterialTheme.typography.labelMedium,color=AppColors.Muted);Text("已使用 ${video.used/60000} 分钟",style=MaterialTheme.typography.labelMedium,color=AppColors.Muted)}
          if(video.sleepDeducted>0 || video.expired>0 || video.reversed>0 || db.pendingSleepPenalty()>0) Text("睡眠扣减 ${video.sleepDeducted/60000} · 已过期 ${video.expired/60000} · 冲回 ${video.reversed/60000} · 待抵扣 ${db.pendingSleepPenalty()/60000} 分钟",style=MaterialTheme.typography.labelSmall,color=AppColors.Muted)
+         val nightPendingVideo=db.pendingNightPenalty("video");val nightPendingGames=db.pendingNightPenalty("game")
+         if(video.nightDeducted>0 || games.nightDeducted>0 || nightPendingVideo>0 || nightPendingGames>0) Text("夜间抵扣 · 视频 ${video.nightDeducted/60000} 分钟、游戏 ${games.nightDeducted} 局 · 待抵扣 ${nightPendingVideo/60000} 分钟、$nightPendingGames 局",style=MaterialTheme.typography.labelSmall,color=AppColors.Muted)
          Text("游戏已获 ${games.earned} 局 · 已用 ${games.used} 局 · 每日 00:00 更新，额度 ${db.setting("boundary","4").padStart(2,'0')}:00 结算",style=MaterialTheme.typography.labelSmall,color=AppColors.Quiet)
          if(games.remaining > 0) TextButton(onClick={db.consume("game",1); refresh++}) { Text("手动记录已使用一局") }
         } }
@@ -157,7 +159,7 @@ class MainActivity : ComponentActivity() {
          TextButton(onClick={db.startLearning();refresh++},enabled=!db.learningActive()) {Text(if(db.learningActive()) "B站学习窗口进行中" else "开启 B站15分钟学习窗口")}
          Text("学习窗口临时放行 · 不扣视频额度",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
          TextButton(onClick={page=5;settingsSection="protection"}){Text("受限应用与权限")}
-         TextButton(onClick={page=5;settingsSection="sleep"}){Text("睡眠记录与规则")}
+         TextButton(onClick={page=5;settingsSection="sleep"}){Text("夜间收尾设置")}
         } }
         item { CardBlock { Text("最近记录",style=MaterialTheme.typography.titleMedium); val records=db.rewardHistory(); if(records.isEmpty()) Text("奖励发放和使用会显示在这里",color=AppColors.Muted); records.take(3).forEach { record -> TextButton(onClick={selectedRewardRecord=record},contentPadding=PaddingValues(vertical=4.dp,horizontal=0.dp)) {Text(record,style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)} }; if(records.size>3) TextButton(onClick={showAllRewardHistory=true}) { Text("查看全部 ${records.size} 条记录") } } }
        }
@@ -168,12 +170,12 @@ class MainActivity : ComponentActivity() {
        }
        4 -> { item { FocusScreen(db,focusTimer,tasks,onTasks={page=0},onChanged={refresh++}) } }
         5 -> {
-         item { SettingsPageHeader(if(settingsSection==null) "设置" else when(settingsSection){"protection"->"应用保护";"reward"->"奖励规则";"sleep"->"睡眠与作息";"backup"->"数据与备份";else->"关于向前"}, if(settingsSection==null) "今天" else "设置", onBack={if(settingsSection==null)page=0 else settingsSection=null}) }
+          item { SettingsPageHeader(if(settingsSection==null) "设置" else when(settingsSection){"protection"->"应用保护";"reward"->"奖励规则";"sleep"->"夜间收尾";"backup"->"数据与备份";else->"关于向前"}, if(settingsSection==null) "今天" else "设置", onBack={if(settingsSection==null)page=0 else settingsSection=null}) }
          if(settingsSection==null) {
-          val sleepTargets=db.sleepTargets()
           item { SettingsDestinationRow("应用保护",if(protected) "无障碍服务已连接 · ${store.selected.size} 个受限应用" else "配置受限应用与无障碍权限",if(protected) "运行中" else "未开启"){settingsSection="protection"} }
           item { SettingsDestinationRow("奖励规则","查看额度重置时间与规则", "${db.setting("boundary","4").padStart(2,'0')}:00"){settingsSection="reward"} }
-          item { SettingsDestinationRow("睡眠与作息","目标、记录与奖励扣减","${sleepTargets[0]} · ${sleepTargets[1]}"){settingsSection="sleep"} }
+          val night=db.nightWrapUpConfig()
+          item { SettingsDestinationRow("夜间收尾","提醒、工作截止与娱乐限制","${night.windDown} · ${night.entertainmentCutoff}"){settingsSection="sleep"} }
           item { SettingsDestinationRow("数据与备份","导出或恢复本地数据"){settingsSection="backup"} }
           item { SettingsDestinationRow("关于向前","版本与应用信息",BuildConfig.VERSION_NAME){settingsSection="about"} }
          } else when(settingsSection) {
@@ -183,7 +185,7 @@ class MainActivity : ComponentActivity() {
            items(apps,key={it.activityInfo.packageName}) {app->val pkg=app.activityInfo.packageName;Row(Modifier.fillMaxWidth().heightIn(min=52.dp).toggleable(value=pkg in store.selected,onValueChange={checked->store.selected=if(checked)store.selected+pkg else store.selected-pkg;refresh++}).padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically){Text(app.loadLabel(packageManager).toString(),modifier=Modifier.weight(1f));Checkbox(pkg in store.selected,onCheckedChange=null)} }
           }
           "reward" -> item { DaySettings(db){refresh++} }
-          "sleep" -> item { SleepCard(db,refresh){refresh++} }
+          "sleep" -> item { NightWrapUpCard(db,refresh){refresh++} }
           "backup" -> item { BackupView(db,{refresh++},{focusTimer.resetAfterRestore()}) }
           else -> item { CardBlock { Text("向前",style=MaterialTheme.typography.titleLarge);Text("版本 ${BuildConfig.VERSION_NAME}",color=AppColors.Muted);Text("任务、专注与成长记录",color=AppColors.Muted) } }
          }

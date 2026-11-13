@@ -31,6 +31,8 @@ class FocusService : AccessibilityService() {
     private var lastTick = 0L
     private var blockActivityShowing = false
     private var beforeScreenOff: String? = null
+    private var nightAttemptRecorded = false
+    private var sessionStartedAt = 0L
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -79,6 +81,10 @@ class FocusService : AccessibilityService() {
         if (pkg == packageName && blockActivityShowing) return
         if (pkg != packageName) blockActivityShowing = false
         charge()
+        if (pkg != current) {
+            nightAttemptRecorded = false
+            sessionStartedAt = System.currentTimeMillis()
+        }
         current = pkg
         enforce()
     }
@@ -96,7 +102,16 @@ class FocusService : AccessibilityService() {
         val pkg = current ?: return
         val contract = db.contract()
         val noAllowance=when(pkg){in Store.videos->db.balance("video")<=0;in Store.games->db.balance("game")<=0;else->!db.eligible()}
-        val blocked = !contract.emergency && store.canRestrict(pkg) && !(pkg == "tv.danmaku.bili" && db.learningActive()) && pkg in store.selected && noAllowance
+        val selectedEntertainment = pkg in (Store.videos + Store.games) && pkg in store.selected
+        val learningExempt = pkg == "tv.danmaku.bili" && db.learningActive()
+        val nightRestricted = selectedEntertainment && db.nightEntertainmentRestricted() && !contract.emergency && !learningExempt
+        val verifiableNightBlock = nightRestricted && store.canRestrict(pkg)
+        if (verifiableNightBlock && !nightAttemptRecorded) {
+            val cycle = db.nightCycleDate()
+            db.recordNightViolation("$cycle|$pkg|${sessionStartedAt.takeIf { it > 0 } ?: System.currentTimeMillis()}", pkg, System.currentTimeMillis())
+            nightAttemptRecorded = true
+        }
+        val blocked = !contract.emergency && store.canRestrict(pkg) && !learningExempt && pkg in store.selected && (noAllowance || nightRestricted)
         if (blocked) {
             if (!blockActivityShowing) show()
         } else {

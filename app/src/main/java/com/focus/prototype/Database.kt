@@ -8,15 +8,17 @@ import android.database.sqlite.SQLiteOpenHelper
 import android.os.SystemClock
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 data class Task(val id: String, val date: String, val title: String, val required: Boolean, val minutes: Int, val mode: String, val checklist: String, val rewardMinutes: Int, val rewardGames: Int, val elapsed: Long, val runningSince: Long, val bootTime: Long, val evidence: String, val done: Boolean, val claimed: Boolean, val completedAt: Long = 0L)
 data class Contract(val date: String, val confirmed: Boolean, val rest: Boolean, val baseMinutes: Int, val baseGames: Int, val baseClaimed: Boolean, val emergency: Boolean)
 data class SleepRecord(val date:String,val bedtime:String,val wakeTime:String,val bedtimePenalty:Long,val wakePenalty:Long,val excepted:Boolean,val reason:String,val source:String="manual")
-data class RewardSnapshot(val earned:Long,val used:Long,val sleepDeducted:Long,val expired:Long,val reversed:Long,val remaining:Long)
+data class RewardSnapshot(val earned:Long,val used:Long,val sleepDeducted:Long,val expired:Long,val reversed:Long,val remaining:Long,val nightDeducted:Long=0L)
 data class GrowthPeriodStats(val planDays:Int,val achievedDays:Int,val weekPlanDays:Int,val weekAchievedDays:Int,val focusMillis:Long)
 
-class Database(context: Context, name:String = "journey.db", private val wallNow:()->Long = { System.currentTimeMillis() }, private val now:()->LocalDateTime = { LocalDateTime.now() }) : SQLiteOpenHelper(context, name, null, 5), java.io.Closeable {
+class Database(context: Context, name:String = "journey.db", private val wallNow:()->Long = { System.currentTimeMillis() }, private val now:()->LocalDateTime = { LocalDateTime.now() }) : SQLiteOpenHelper(context, name, null, 7), java.io.Closeable {
  override fun onCreate(db: SQLiteDatabase) {
   db.execSQL("CREATE TABLE contracts(day TEXT PRIMARY KEY, confirmed INTEGER NOT NULL DEFAULT 0, rest INTEGER NOT NULL DEFAULT 0, base_minutes INTEGER NOT NULL DEFAULT 30, base_games INTEGER NOT NULL DEFAULT 0, base_claimed INTEGER NOT NULL DEFAULT 0, emergency INTEGER NOT NULL DEFAULT 0, boundary INTEGER NOT NULL DEFAULT 4)")
   db.execSQL("CREATE TABLE tasks(id TEXT PRIMARY KEY, day TEXT NOT NULL, title TEXT NOT NULL, required INTEGER NOT NULL, minutes INTEGER NOT NULL, mode TEXT NOT NULL, checklist TEXT NOT NULL, reward_minutes INTEGER NOT NULL, reward_games INTEGER NOT NULL, elapsed INTEGER NOT NULL DEFAULT 0, running_since INTEGER NOT NULL DEFAULT 0, boot_time INTEGER NOT NULL DEFAULT 0, evidence TEXT NOT NULL DEFAULT '', done INTEGER NOT NULL DEFAULT 0, claimed INTEGER NOT NULL DEFAULT 0, recurrence TEXT NOT NULL DEFAULT 'once', origin TEXT NOT NULL DEFAULT '', completed_at INTEGER NOT NULL DEFAULT 0)")
@@ -25,10 +27,28 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   db.execSQL("CREATE TABLE audit(id TEXT PRIMARY KEY, day TEXT NOT NULL, detail TEXT NOT NULL, created INTEGER NOT NULL)")
   db.execSQL("CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
   db.execSQL("CREATE TABLE task_moves(source_id TEXT PRIMARY KEY,target_id TEXT NOT NULL,from_day TEXT NOT NULL,to_day TEXT NOT NULL,created INTEGER NOT NULL)")
+  db.execSQL("CREATE TABLE night_violations(id TEXT PRIMARY KEY,cycle_date TEXT NOT NULL,package_name TEXT NOT NULL,observed_at INTEGER NOT NULL,reserved_minutes INTEGER NOT NULL DEFAULT 0,reward_kind TEXT NOT NULL DEFAULT 'video',reserved_amount INTEGER NOT NULL DEFAULT 0)")
   upgradeTemplates(db)
   upgradeAttachments(db)
  }
- override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) { if(oldVersion<2) upgradeTemplates(db);if(oldVersion<3) upgradeAttachments(db);if(oldVersion<4)db.execSQL("CREATE TABLE IF NOT EXISTS task_moves(source_id TEXT PRIMARY KEY,target_id TEXT NOT NULL,from_day TEXT NOT NULL,to_day TEXT NOT NULL,created INTEGER NOT NULL)");if(oldVersion<5)db.execSQL("ALTER TABLE tasks ADD COLUMN completed_at INTEGER NOT NULL DEFAULT 0") }
+ override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+  if(oldVersion<2) upgradeTemplates(db)
+  if(oldVersion<3) upgradeAttachments(db)
+  if(oldVersion<4)db.execSQL("CREATE TABLE IF NOT EXISTS task_moves(source_id TEXT PRIMARY KEY,target_id TEXT NOT NULL,from_day TEXT NOT NULL,to_day TEXT NOT NULL,created INTEGER NOT NULL)")
+  if(oldVersion<5)db.execSQL("ALTER TABLE tasks ADD COLUMN completed_at INTEGER NOT NULL DEFAULT 0")
+  if(oldVersion<6) db.execSQL("CREATE TABLE IF NOT EXISTS night_violations(id TEXT PRIMARY KEY,cycle_date TEXT NOT NULL,package_name TEXT NOT NULL,observed_at INTEGER NOT NULL,reserved_minutes INTEGER NOT NULL DEFAULT 0,reward_kind TEXT NOT NULL DEFAULT 'video',reserved_amount INTEGER NOT NULL DEFAULT 0)")
+  if(oldVersion in 6 until 7) {
+   db.execSQL("ALTER TABLE night_violations ADD COLUMN reward_kind TEXT NOT NULL DEFAULT 'video'")
+   db.execSQL("ALTER TABLE night_violations ADD COLUMN reserved_amount INTEGER NOT NULL DEFAULT 0")
+   db.execSQL("UPDATE night_violations SET reserved_amount=reserved_minutes*60000")
+   val legacyPending=mutableListOf<Pair<String,String>>()
+   db.rawQuery("SELECT key,value FROM settings WHERE key GLOB 'night_pending_????-??-??'",null).use { c -> while(c.moveToNext())legacyPending.add(c.getString(0).removePrefix("night_pending_") to c.getString(1)) }
+   legacyPending.forEach { (cycle,value) -> db.update("settings",cv("key" to "night_pending_video_$cycle","value" to value),"key=?",arrayOf("night_pending_$cycle")) }
+   val legacyReserved=mutableListOf<Pair<String,String>>()
+   db.rawQuery("SELECT key,value FROM settings WHERE key GLOB 'night_reserved_????-??-??'",null).use { c -> while(c.moveToNext())legacyReserved.add(c.getString(0).removePrefix("night_reserved_") to c.getString(1)) }
+   legacyReserved.forEach { (cycle,value) -> db.update("settings",cv("key" to "night_reserved_video_$cycle","value" to value),"key=?",arrayOf("night_reserved_$cycle")) }
+  }
+ }
  private fun upgradeAttachments(db:SQLiteDatabase) {
   db.execSQL("CREATE TABLE attachments(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,path TEXT NOT NULL,created INTEGER NOT NULL)")
   seedAttachments(db)
@@ -141,21 +161,37 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
  private fun grantReward(db:SQLiteDatabase,date:String,source:String,kind:String,amount:Long) {
   if(amount<=0)return
   ledger(db,date,source,kind,amount)
-  if(kind!="video")return
   var available=amount
-  val pending=mutableListOf<Triple<String,String,Long>>()
-  db.rawQuery("SELECT key,value FROM settings WHERE key GLOB 'sleep_pending_*' AND CAST(value AS INTEGER)>0",null).use { c ->
-   while(c.moveToNext()) {
-    val key=c.getString(0);val parts=key.removePrefix("sleep_pending_").split('_')
-    if(parts.size>=2)pending.add(Triple(parts.dropLast(1).joinToString("_"),parts.last(),c.getString(1).toLong()))
+  if(kind=="video") {
+   val pending=mutableListOf<Triple<String,String,Long>>()
+   db.rawQuery("SELECT key,value FROM settings WHERE key GLOB 'sleep_pending_*' AND CAST(value AS INTEGER)>0",null).use { c ->
+    while(c.moveToNext()) {
+     val key=c.getString(0);val parts=key.removePrefix("sleep_pending_").split('_')
+     if(parts.size>=2)pending.add(Triple(parts.dropLast(1).joinToString("_"),parts.last(),c.getString(1).toLong()))
+    }
+   }
+   pending.sortedWith(compareBy<Triple<String,String,Long>>{it.first}.thenBy{it.second}).forEach { (sleepDate,sourceType,amountDue) ->
+    if(available<=0)return@forEach
+    val charged=minOf(available,amountDue);val at=System.currentTimeMillis()
+    appendDebit(db,date,"sleep:$sourceType:$sleepDate",kind,charged,at)
+    appendDebit(db,date,source,allocationKind(kind),charged,at)
+    setSetting(pendingSleepKey(sleepDate,sourceType),(amountDue-charged).toString())
+    available-=charged
    }
   }
-  pending.sortedWith(compareBy<Triple<String,String,Long>>{it.first}.thenBy{it.second}).forEach { (sleepDate,sourceType,amountDue) ->
+  applyPendingNightPenalty(db,date,source,kind,available)
+ }
+ private fun applyPendingNightPenalty(db:SQLiteDatabase,date:String,source:String,kind:String,initialAvailable:Long) {
+  var available=initialAvailable
+  val pending=mutableListOf<Pair<String,Long>>()
+  val suffix=if(kind=="video")"video_" else "game_"
+  db.rawQuery("SELECT key,value FROM settings WHERE key GLOB ? AND CAST(value AS INTEGER)>0",arrayOf("night_pending_$suffix*")).use { c -> while(c.moveToNext())pending.add(c.getString(0).removePrefix("night_pending_$suffix") to c.getString(1).toLong()) }
+  pending.sortedBy{it.first}.forEach { (nightDate,due) ->
    if(available<=0)return@forEach
-   val charged=minOf(available,amountDue);val at=System.currentTimeMillis()
-   appendDebit(db,date,"sleep:$sourceType:$sleepDate",kind,charged,at)
-   appendDebit(db,date,source,allocationKind(kind),charged,at)
-   setSetting(pendingSleepKey(sleepDate,sourceType),(amountDue-charged).toString())
+   val charged=minOf(available,due)
+   ledger(db,date,"night:$kind:$nightDate:$source",kind,-charged)
+   ledger(db,date,source,allocationKind(kind),-charged)
+   setSetting("night_pending_$suffix$nightDate",(due-charged).toString())
    available-=charged
   }
  }
@@ -191,8 +227,52 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    -total("task_id LIKE 'sleep:%' AND amount<0"),
    -total("task_id='expiry' AND amount<0"),
    -total("task_id LIKE 'revoke:%' AND amount<0"),balance(kind,day),
+   -total("task_id LIKE 'night:%' AND amount<>0"),
   )
  }
+ fun nightWrapUpConfig()=NightWrapUpConfig(
+  setting("night_wind_down","22:00"),setting("night_work_cutoff","23:30"),setting("night_entertainment_cutoff","00:00"),setting("night_bedtime","00:30"),setting("night_morning_release","07:30"),setting("night_penalty_cap","10").toIntOrNull()?:10,
+  setting("night_penalty_cap_games","1").toIntOrNull()?:1,
+ ).validate()
+ fun saveNightWrapUpConfig(config:NightWrapUpConfig) {
+  config.validate()
+  setSetting("night_wind_down",config.windDown);setSetting("night_work_cutoff",config.workCutoff)
+  setSetting("night_entertainment_cutoff",config.entertainmentCutoff);setSetting("night_bedtime",config.bedtime)
+  setSetting("night_morning_release",config.morningRelease);setSetting("night_penalty_cap",config.penaltyCapMinutes.toString())
+  setSetting("night_penalty_cap_games",config.penaltyCapGames.toString())
+ }
+ fun nightEntertainmentRestricted(at:LocalDateTime=now())=nightWrapUpConfig().entertainmentRestricted(at)
+ fun nightCycleDate(at:LocalDateTime=now())=nightWrapUpConfig().cycleDate(at).toString()
+ fun recordNightViolation(eventId:String,packageName:String,observedAt:Long,perEventMinutes:Int=5):Boolean {
+  require(eventId.isNotBlank()&&packageName.isNotBlank()&&perEventMinutes in 1..10)
+  val config=nightWrapUpConfig();val observed=Instant.ofEpochMilli(observedAt).atZone(ZoneId.systemDefault()).toLocalDateTime()
+  if(!config.entertainmentRestricted(observed))return false
+  val cycle=config.cycleDate(observed).toString();val sql=writableDatabase;sql.beginTransaction()
+  try {
+   val kind=if(packageName in Store.games) "game" else "video"
+   val values=cv("id" to eventId,"cycle_date" to cycle,"package_name" to packageName,"observed_at" to observedAt,"reserved_minutes" to 0,"reward_kind" to kind,"reserved_amount" to 0L)
+   val inserted=sql.insertWithOnConflict("night_violations",null,values,SQLiteDatabase.CONFLICT_IGNORE)
+   if(inserted==-1L){sql.setTransactionSuccessful();return false}
+   val key="night_reserved_${kind}_$cycle";val already=setting(key,"0").toIntOrNull()?:0
+   val cap=if(kind=="video")config.penaltyCapMinutes else config.penaltyCapGames
+   val reserved=if(kind=="video") minOf(perEventMinutes,(cap-already).coerceAtLeast(0)) else minOf(1,(cap-already).coerceAtLeast(0))
+   val reservedAmount=if(kind=="video")reserved*60_000L else reserved.toLong()
+   if(reserved>0){sql.update("night_violations",cv("reserved_minutes" to if(kind=="video")reserved else 0,"reserved_amount" to reservedAmount),"id=?",arrayOf(eventId));setSetting(key,(already+reserved).toString());val pendingKey="night_pending_${kind}_$cycle";setSetting(pendingKey,((setting(pendingKey,"0").toLongOrNull()?:0L)+reservedAmount).toString())}
+   val rewardLabel=if(kind=="video")"视频分钟" else "游戏局数"
+   val amountLabel=if(kind=="video")"$reserved 分钟" else "$reserved 局"
+   audit(cycle,"夜间娱乐访问已拦截：$packageName"+(if(reserved>0)"；后续${rewardLabel}最多抵扣 $amountLabel" else "；已达到本夜抵扣上限"))
+   sql.setTransactionSuccessful();return true
+  } finally {sql.endTransaction()}
+ }
+ fun nightViolations(cycleDate:String):List<NightViolation> = readableDatabase.rawQuery("SELECT id,cycle_date,package_name,observed_at,reward_kind,reserved_amount FROM night_violations WHERE cycle_date=? ORDER BY observed_at",arrayOf(cycleDate)).use{c->buildList{while(c.moveToNext())add(NightViolation(c.getString(0),c.getString(1),c.getString(2),c.getLong(3),c.getString(4),c.getLong(5)))}}
+ fun pendingNightPenalty(kind:String="video",cycleDate:String?=null):Long {
+  val pattern=if(cycleDate==null) "night_pending_${kind}_*" else "night_pending_${kind}_$cycleDate"
+  return readableDatabase.rawQuery("SELECT COALESCE(SUM(CAST(value AS INTEGER)),0) FROM settings WHERE key GLOB ?",arrayOf(pattern)).use{it.moveToFirst();it.getLong(0).coerceAtLeast(0)}
+ }
+ fun nightDeducted(day:String=rewardDay(),kind:String="video"):Long = readableDatabase.rawQuery(
+  "SELECT COALESCE(-SUM(amount),0) FROM ledger WHERE day=? AND kind=? AND task_id LIKE ? AND amount<>0",
+  arrayOf(day,kind,"night:$kind:%")
+ ).use{it.moveToFirst();it.getLong(0)}
  fun consume(kind: String, amount: Long, day: String = rewardDay()) { val db = writableDatabase; db.beginTransaction(); try { allocateLegacySpending(db,day,kind);val actual = minOf(balance(kind,day),amount.coerceAtLeast(0)); if(actual > 0) {val created=System.currentTimeMillis();appendDebit(db,day,"usage",kind,actual,created);allocateSpend(db,day,kind,actual,created)}; db.setTransactionSuccessful() } finally { db.endTransaction() } }
  fun claim(task: Task, kind: String) { val db = writableDatabase; db.beginTransaction(); try { val fresh = tasks(task.date).first { it.id == task.id }; if (eligible(task.date) && !fresh.required && fresh.done && !fresh.claimed && task.date == day()) { val amount = if(kind == "video") fresh.rewardMinutes * 60000L else fresh.rewardGames.toLong(); require(amount > 0); grantReward(db,rewardDay(),task.id,kind,amount); db.update("tasks",cv("claimed" to true),"id=?",arrayOf(task.id)) }; db.setTransactionSuccessful() } finally { db.endTransaction() } }
  fun start(task: Task) { val fresh=tasks(task.date).first{it.id==task.id};if(fresh.done || fresh.runningSince != 0L) return; runningTasks().forEach{pause(it)};writableDatabase.update("tasks",cv("running_since" to SystemClock.elapsedRealtime(),"boot_time" to (System.currentTimeMillis()-SystemClock.elapsedRealtime())),"id=?",arrayOf(task.id)) }
@@ -288,7 +368,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    val out=mutableListOf<Pair<Long,String>>()
   readableDatabase.rawQuery("SELECT l.day,l.kind,l.amount,l.task_id,l.created,t.title FROM ledger l LEFT JOIN tasks t ON t.id=l.task_id WHERE l.amount<>0 AND l.kind NOT LIKE '%_allocation' ORDER BY l.created DESC,l.rowid DESC LIMIT 100",null).use {c->while(c.moveToNext()) {
    val amount=c.getLong(2);val source=c.getString(3);val eventTime=java.time.Instant.ofEpochMilli(c.getLong(4)).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime();val absolute=kotlin.math.abs(amount);val value=if(c.getString(1)=="video") {val minutes=absolute/60000;val seconds=absolute%60000/1000;when{minutes==0L->"${seconds.coerceAtLeast(1)} 秒";seconds==0L->"$minutes 分钟";else->"$minutes 分 $seconds 秒"}} else "${absolute} 局"
-    val title=c.getString(5);val label=when{source=="expiry"->"奖励到期 −$value";source=="usage"->"已使用 $value";source.startsWith("sleep:")->"睡眠规则抵扣 −$value";source.startsWith("sleep-refund:")->"睡眠记录修正返还 +$value";source.startsWith("revoke:")||amount<0->"任务奖励冲回 −$value";source=="base"->"基础奖励 +$value";else->"${if(readableDatabase.rawQuery("SELECT required FROM tasks WHERE id=?",arrayOf(source)).use{it.moveToFirst()&&it.getInt(0)!=0})"必做奖励" else "选做奖励"} · ${title?:"历史任务"} +$value"}
+    val title=c.getString(5);val label=when{source=="expiry"->"奖励到期 −$value";source=="usage"->"已使用 $value";source.startsWith("sleep:")->"睡眠规则抵扣 −$value";source.startsWith("sleep-refund:")->"睡眠记录修正返还 +$value";source.startsWith("night:")->if(amount<0)"夜间收尾抵扣 −$value" else "夜间抵扣冲回 +$value";source.startsWith("revoke:")||amount<0->"任务奖励冲回 −$value";source=="base"->"基础奖励 +$value";else->"${if(readableDatabase.rawQuery("SELECT required FROM tasks WHERE id=?",arrayOf(source)).use{it.moveToFirst()&&it.getInt(0)!=0})"必做奖励" else "选做奖励"} · ${title?:"历史任务"} +$value"}
     val time=eventTime.toLocalTime().toString().take(5);out.add(c.getLong(4) to "${eventTime.monthValue}月${eventTime.dayOfMonth}日 $time · $label")
   } }
    readableDatabase.rawQuery("SELECT day,detail,created FROM audit WHERE detail LIKE '紧急解锁%' OR detail='恢复保护' ORDER BY created DESC LIMIT 30",null).use { c -> while(c.moveToNext()) {
@@ -306,6 +386,17 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
      val buckets=mutableListOf<String>();db.rawQuery("SELECT DISTINCT day FROM ledger WHERE task_id=? AND kind=?",arrayOf(source,kind)).use{while(it.moveToNext())buckets.add(it.getString(0))}
      for(bucket in buckets) {
       allocateLegacySpending(db,bucket,kind)
+      val nightDebits=mutableListOf<Pair<String,Long>>()
+      db.rawQuery("SELECT task_id,SUM(amount) FROM ledger WHERE day=? AND kind=? AND task_id LIKE ? GROUP BY task_id HAVING SUM(amount)<0",arrayOf(bucket,kind,"night:$kind:%:$source")).use { c -> while(c.moveToNext())nightDebits.add(c.getString(0) to -c.getLong(1)) }
+      nightDebits.forEach { (nightSource,amount) ->
+       val cycle=nightSource.split(':').getOrNull(2).orEmpty()
+       if(cycle.isNotBlank()) {
+        ledger(db,bucket,nightSource,kind,amount)
+        ledger(db,bucket,source,allocationKind(kind),amount)
+        val key="night_pending_${kind}_$cycle"
+        setSetting(key,((setting(key,"0").toLongOrNull()?:0L)+amount).toString())
+       }
+      }
       val granted = db.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND task_id=? AND kind=?",arrayOf(bucket,source,kind)).use { it.moveToFirst(); it.getLong(0) }
       val spent = db.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND task_id=? AND kind=?",arrayOf(bucket,source,allocationKind(kind))).use { it.moveToFirst(); it.getLong(0) }
       val reversal = minOf((granted+spent).coerceAtLeast(0),balance(kind,bucket))

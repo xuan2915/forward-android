@@ -45,6 +45,8 @@ class BlockOverlayActivity : ComponentActivity() {
         val density = resources.displayMetrics.density
         fun dp(value: Int) = (value * density).toInt()
         val blockedPackage=intent.getStringExtra(EXTRA_BLOCKED_PACKAGE).orEmpty()
+        val nightConfig=db.nightWrapUpConfig()
+        val nightRestricted=db.nightEntertainmentRestricted()&&blockedPackage in (Store.videos+Store.games)&&!db.contract().emergency&&!(blockedPackage=="tv.danmaku.bili"&&db.learningActive())
         val exhausted = if(blockedPackage in Store.games) db.balance("game")==0L else db.balance("video")==0L&&db.tasks().any{it.required&&it.done}
         val nextReward=db.tasks().firstOrNull{it.required&&!it.done&&(if(blockedPackage in Store.games)it.rewardGames>0 else it.rewardMinutes>0)}
         val panel = LinearLayout(this).apply {
@@ -77,9 +79,10 @@ class BlockOverlayActivity : ComponentActivity() {
             panel.addView(view, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
         }
 
-        panel.addView(label("自律 · 娱乐时间", 12f, 0xffa1a4a7.toInt(), true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(22) })
-        panel.addView(label(if (exhausted) "娱乐额度已用完" else "先完成一项必做任务", 29f, 0xfff1f0ed.toInt(), true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+        panel.addView(label(if(nightRestricted) "夜间收尾 · 娱乐限制" else "自律 · 娱乐时间", 12f, 0xffa1a4a7.toInt(), true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(22) })
+        panel.addView(label(if(nightRestricted) "现在是娱乐休息时间" else if (exhausted) "娱乐额度已用完" else "先完成一项必做任务", 29f, 0xfff1f0ed.toInt(), true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         val reason=when {
+            nightRestricted -> "已选娱乐应用在 ${nightConfig.entertainmentCutoff} 至 ${nightConfig.morningRelease} 受限"
             nextReward!=null -> "完成「${nextReward.title}」后获得 ${if(blockedPackage in Store.games)"${nextReward.rewardGames} 局游戏奖励" else "${nextReward.rewardMinutes} 分钟视频时间"}"
             exhausted -> "完成下一项有奖励的必做任务，获得对应额度"
             else -> "在今日任务中设置必做奖励，完成后即可使用"
