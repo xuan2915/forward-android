@@ -4,15 +4,22 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.OutlinedTextField
@@ -24,6 +31,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.layer.drawLayer
@@ -40,6 +49,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -254,6 +264,19 @@ internal fun DailyCardDialog(record: DailyCardRecord, db: Database, onEdit: () -
     val scope = rememberCoroutineScope()
     val layer = rememberGraphicsLayer()
     var saveStatus by remember { mutableStateOf("") }
+    var dialogVisible by remember(record.date) { mutableStateOf(false) }
+    var dismissing by remember(record.date) { mutableStateOf(false) }
+    val dismissDuration = motionMillis(AppMotion.Short)
+    LaunchedEffect(record.date) { dialogVisible = true }
+    fun dismissAfter(action: () -> Unit) {
+        if (dismissing) return
+        dismissing = true
+        dialogVisible = false
+        scope.launch {
+            delay(dismissDuration.toLong())
+            action()
+        }
+    }
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
         if (uri != null) scope.launch {
             val result = runCatching {
@@ -263,18 +286,23 @@ internal fun DailyCardDialog(record: DailyCardRecord, db: Database, onEdit: () -
                     stream.use { check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)) }
                 }
             }
-            saveStatus = if (result.isSuccess) "卡片已保存" else "保存失败，请重试"
+            saveStatus = if (result.isSuccess) "图片已保存" else "没能保存，再试一次"
             if (result.isSuccess) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         }
     }
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(onDismissRequest = { dismissAfter(onDismiss) }) {
         androidx.compose.animation.AnimatedVisibility(
-            visible = true,
-            enter = fadeIn(tween(340)) + scaleIn(animationSpec = tween(420), initialScale = .96f),
+            visible = dialogVisible,
+            enter = fadeIn(tween(motionMillis(AppMotion.Standard), easing = AppMotion.Ease)) +
+                slideInVertically(tween(motionMillis(AppMotion.Standard), easing = AppMotion.Ease)) { it / 36 } +
+                scaleIn(tween(motionMillis(AppMotion.Standard), easing = AppMotion.Ease), initialScale = .985f),
+            exit = fadeOut(tween(motionMillis(AppMotion.Short), easing = AppMotion.Ease)) +
+                slideOutVertically(tween(motionMillis(AppMotion.Short), easing = AppMotion.Ease)) { it / 48 },
         ) {
           Surface(shape = MaterialTheme.shapes.medium, color = AppColors.Surface) {
             Column(Modifier.fillMaxWidth().padding(AppSpace.Small)) {
-                if (!record.revealSeen) Text("今日纪念已收录", Modifier.padding(horizontal = AppSpace.Medium, vertical = AppSpace.Small), style = MaterialTheme.typography.titleMedium)
+                if (!record.revealSeen) Text("今日纪念已收录", Modifier.padding(horizontal = AppSpace.Medium, vertical = AppSpace.Small),
+                    style = MaterialTheme.typography.titleMedium.copy(letterSpacing = .18.sp))
                 Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                     val capture = Modifier.fillMaxWidth().drawWithContent {
                         layer.record { this@drawWithContent.drawContent() }
@@ -282,11 +310,19 @@ internal fun DailyCardDialog(record: DailyCardRecord, db: Database, onEdit: () -
                     }
                     DailyEditorialCard(record, db, capture)
                 }
-                if (saveStatus.isNotEmpty()) Text(saveStatus, Modifier.padding(horizontal = AppSpace.Medium))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = onDismiss) { Text("关闭") }
-                    TextButton(onClick = { onDismiss(); onEdit() }) { Text("编辑") }
-                    TextButton(onClick = { save.launch("向前-${record.date}.png") }) { Text("保存为图片") }
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = saveStatus.isNotEmpty(),
+                    enter = fadeIn(tween(motionMillis(AppMotion.Short))) + slideInVertically(tween(motionMillis(AppMotion.Short))) { it / 3 },
+                    exit = fadeOut(tween(motionMillis(AppMotion.Short))) + slideOutVertically(tween(motionMillis(AppMotion.Short))) { it / 3 },
+                ) {
+                    Text(saveStatus, Modifier.padding(horizontal = AppSpace.Medium),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (saveStatus == "图片已保存") AppColors.Accent else MaterialTheme.colorScheme.error)
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { dismissAfter(onDismiss) }) { Text("关闭") }
+                    TextButton(onClick = { dismissAfter { onDismiss(); onEdit() } }) { Text("编辑") }
+                    Button(onClick = { save.launch("向前-${record.date}.png") }, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("保存图片") }
                 }
             }
           }
@@ -312,16 +348,16 @@ private fun DailyEditorialCard(record: DailyCardRecord, db: Database, modifier: 
     }
     val ink = AppColors.PaperInk
 
-    BoxWithConstraints(modifier.background(AppColors.Paper)) {
+    BoxWithConstraints(modifier.clip(RoundedCornerShape(4.dp)).background(AppColors.Paper)) {
         val width = maxWidth
         val inset = width * .085f
         val serif = FontFamily.Serif
         val refinedSans = FontFamily(Font(R.font.figtree))
-        val daySize = (width.value * .16f).sp
-        val detailSize = (width.value * .037f).sp
-        val sourceSize = (width.value * .032f).sp
-        val quoteSize = (width.value * if (record.quote.length > 34) .062f else .073f).sp
-        val month = "${date.year} 年 ${date.monthValue} 月"
+        val daySize = (width.value * .16f).coerceIn(56f, 76f).sp
+        val detailSize = (width.value * .037f).coerceIn(13f, 17f).sp
+        val sourceSize = (width.value * .032f).coerceIn(11f, 14f).sp
+        val quoteSize = (width.value * if (record.quote.length > 34) .061f else .071f).coerceIn(20f, 29f).sp
+        val month = "${date.year}年${date.monthValue}月"
 
         Column(Modifier.fillMaxWidth()) {
             Column(Modifier.fillMaxWidth().padding(horizontal = inset)) {
@@ -330,41 +366,51 @@ private fun DailyEditorialCard(record: DailyCardRecord, db: Database, modifier: 
                     verticalAlignment = Alignment.CenterVertically) {
                     Column {
                         Text(month, color = AppColors.PaperMuted, fontSize = detailSize, fontFamily = refinedSans,
-                            fontWeight = FontWeight.Medium, letterSpacing = .18.sp, lineHeight = detailSize * 1.28f)
+                            fontWeight = FontWeight.Medium, letterSpacing = .28.sp, lineHeight = detailSize * 1.35f)
                         Text(weekday, color = AppColors.PaperMuted, fontSize = sourceSize, fontFamily = refinedSans,
-                            letterSpacing = .22.sp, lineHeight = sourceSize * 1.32f)
+                            letterSpacing = .34.sp, lineHeight = sourceSize * 1.42f)
                     }
                     Text(date.dayOfMonth.toString().padStart(2, '0'), color = ink,
                         fontFamily = serif, fontWeight = FontWeight.Light, fontSize = daySize,
-                        letterSpacing = (-daySize.value * .045f).sp, lineHeight = daySize * 1.02f)
+                        letterSpacing = (-daySize.value * .055f).sp, lineHeight = daySize * 1.08f)
                 }
                 Spacer(Modifier.height(width * .045f))
                 if (record.quote.isNotBlank()) {
                     Text(record.quote, color = ink, fontFamily = serif, fontSize = quoteSize,
-                        fontWeight = FontWeight.Normal, letterSpacing = .06.sp,
-                        lineHeight = quoteSize * 1.39f, modifier = Modifier.fillMaxWidth())
+                        fontWeight = FontWeight.Normal, letterSpacing = .015.sp,
+                        lineHeight = quoteSize * 1.48f, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(width * .044f))
                     Text(attribution, color = AppColors.PaperMuted, fontFamily = refinedSans, fontSize = sourceSize,
-                        fontWeight = FontWeight.Medium, letterSpacing = .18.sp, lineHeight = sourceSize * 1.38f)
+                        fontWeight = FontWeight.Normal, letterSpacing = .22.sp, lineHeight = sourceSize * 1.48f)
                 }
                 if (record.selectedTaskIds.isNotEmpty()) {
                     Spacer(Modifier.height(width * .055f))
-                    record.taskTitles.take(3).forEach { Text(it, color = ink, fontFamily = refinedSans, fontSize = detailSize * 1.08f, lineHeight = detailSize * 1.48f) }
+                    Text("今日行动", color = AppColors.PaperMuted, fontFamily = refinedSans, fontSize = sourceSize,
+                        fontWeight = FontWeight.Medium, letterSpacing = .36.sp, lineHeight = sourceSize * 1.35f)
+                    Spacer(Modifier.height(width * .012f))
+                    record.taskTitles.take(3).forEach { title ->
+                        Text(title, color = ink, fontFamily = refinedSans, fontSize = detailSize,
+                            lineHeight = detailSize * 1.55f)
+                    }
                 }
                 if (record.note.isNotBlank()) {
                     Spacer(Modifier.height(width * .045f))
-                    Text(record.note, color = ink, fontFamily = refinedSans, fontSize = detailSize * 1.08f, lineHeight = detailSize * 1.5f)
+                    Text("当天记录", color = AppColors.PaperMuted, fontFamily = refinedSans, fontSize = sourceSize,
+                        fontWeight = FontWeight.Medium, letterSpacing = .36.sp)
+                    Spacer(Modifier.height(width * .012f))
+                    Text(record.note, color = ink, fontFamily = refinedSans, fontSize = detailSize,
+                        lineHeight = detailSize * 1.58f)
                 }
                 Spacer(Modifier.height(width * .072f))
                 when (record.visual) {
-                    "photo" -> if (photo != null) Image(photo, null, Modifier.fillMaxWidth().aspectRatio(1.34f), contentScale = ContentScale.Crop)
-                    "illustration" -> Image(artwork, null, Modifier.fillMaxWidth().aspectRatio(1.34f), contentScale = ContentScale.Crop)
+                    "photo" -> if (photo != null) Image(photo, null, Modifier.fillMaxWidth().aspectRatio(1.34f).clip(RoundedCornerShape(4.dp)), contentScale = ContentScale.Crop)
+                    "illustration" -> Image(artwork, null, Modifier.fillMaxWidth().aspectRatio(1.34f).clip(RoundedCornerShape(4.dp)), contentScale = ContentScale.Crop)
                     else -> Spacer(Modifier.fillMaxWidth().height(width * .25f))
                 }
                 Spacer(Modifier.height(width * .072f))
                 Spacer(Modifier.fillMaxWidth().height(1.dp).background(AppColors.PaperRule))
                 Spacer(Modifier.height(width * .04f))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalAlignment = Alignment.Bottom) {
                     Text("完成 ${record.completed} 项 · 专注 ${record.focusMinutes} 分钟",
                         color = AppColors.PaperMuted, fontFamily = refinedSans, fontWeight = FontWeight.Medium,
@@ -405,12 +451,12 @@ internal fun DailyCardEditor(db: Database, date: String, tasks: List<Task>, onDi
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = MaterialTheme.shapes.medium, color = AppColors.Surface) {
             Column(Modifier.fillMaxWidth().heightIn(max = 690.dp).padding(AppSpace.Medium)) {
-                Text(if (source.saved) "编辑每日纪念" else "为今天留个记录", style = MaterialTheme.typography.titleLarge)
+                Text(if (source.saved) "编辑纪念卡" else "整理今日纪念", style = MaterialTheme.typography.titleLarge)
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(AppSpace.Small)) {
                     if (preview) {
                         DailyEditorialCard(draft, db, Modifier.fillMaxWidth(), photoPath.takeIf { visual == "photo" && it.isNotBlank() })
                     } else {
-                        Text("选择今天要留下的任务", style = MaterialTheme.typography.titleMedium)
+                        Text("卡片中的任务", style = MaterialTheme.typography.titleMedium)
                         tasks.forEach { task ->
                             Row(Modifier.fillMaxWidth().clickable { selectedIds = if (task.id in selectedIds) selectedIds - task.id else selectedIds + task.id }, verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(task.id in selectedIds, onCheckedChange = { checked -> selectedIds = if (checked) selectedIds + task.id else selectedIds - task.id })
@@ -418,25 +464,25 @@ internal fun DailyCardEditor(db: Database, date: String, tasks: List<Task>, onDi
                             }
                         }
                         OutlinedTextField(value = note, onValueChange = { note = it.take(500) }, label = { Text("今天有什么值得留下？") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
-                        Text("思想内容", style = MaterialTheme.typography.titleMedium)
+                        Text("引文", style = MaterialTheme.typography.titleMedium)
                         TextButton(onClick = { excerptId = "" }) { Text(if (excerptId.isEmpty()) "✓ 不添加引文" else "不添加引文") }
                         if (excerptId == "__legacy__") Text("原有引文 · ${source.quote}")
                         if (excerpt != null) {
                             Text("${excerpt.chinese}\n${excerpt.attribution}")
-                            TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(excerpt.source))) }) { Text("查看原文出处") }
+                            TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(excerpt.source))) }) { Text("查看来源") }
                         }
-                        TextButton(onClick = { quotesExpanded = !quotesExpanded }) { Text(if (quotesExpanded) "收起引文" else "选择引文") }
+                        TextButton(onClick = { quotesExpanded = !quotesExpanded }) { Text(if (quotesExpanded) "收起引文" else "更换引文") }
                         if (quotesExpanded) DailyExcerpts.entries.forEach { item ->
                             TextButton(onClick = { excerptId = item.id; quotesExpanded = false }, modifier = Modifier.fillMaxWidth()) {
                                 Text("${item.chinese}\n${item.attribution}", modifier = Modifier.fillMaxWidth())
                             }
                         }
-                        Text("画面", style = MaterialTheme.typography.titleMedium)
-                        Row { listOf("paper" to "纸张留白", "illustration" to "主题插画", "photo" to "真实照片").forEach { (key, label) ->
+                        Text("卡面图像", style = MaterialTheme.typography.titleMedium)
+                        Row { listOf("paper" to "留白", "illustration" to "主题插画", "photo" to "任务照片").forEach { (key, label) ->
                             TextButton(onClick = { visual = key }) { Text("${if (visual == key) "✓ " else ""}$label") }
                         } }
                         if (visual == "photo") {
-                            if (photos.isEmpty()) Text("今天没有可用的图片附件", color = AppColors.Muted)
+                            if (photos.isEmpty()) Text("暂无可选照片", color = AppColors.Muted)
                             photos.forEachIndexed { index, (title, path) ->
                                 TextButton(onClick = { photoPath = path }) { Text("${if (photoPath == path) "✓ " else ""}$title · 图片 ${index + 1}") }
                             }
@@ -448,12 +494,12 @@ internal fun DailyCardEditor(db: Database, date: String, tasks: List<Task>, onDi
                     TextButton(onClick = { if (preview) preview = false else onDismiss() }) { Text(if (preview) "返回编辑" else "取消") }
                     if (!preview) TextButton(onClick = { preview = true }) { Text("预览") }
                     Button(onClick = {
-                        if (visual == "photo" && photoPath.isBlank()) { error = "请先选择一张真实照片"; return@Button }
+                        if (visual == "photo" && photoPath.isBlank()) { error = "请选择一张任务照片"; return@Button }
                         runCatching {
                             val id = if (visual != "photo") "" else if (photoPath == DailyCards.photoPath(db, source.photoId)) source.photoId else DailyCards.snapshotPhoto(context, db, date, photoPath)
                             DailyCards.save(db, draft.copy(photoId = id))
-                        }.onSuccess { onSaved() }.onFailure { error = "保存失败，请重试" }
-                    }) { Text("保存卡片") }
+                        }.onSuccess { onSaved() }.onFailure { error = "没能保存，再试一次" }
+                    }) { Text("保存更改") }
                 }
             }
         }
@@ -471,27 +517,45 @@ internal fun DailyCardArchive(cards: List<DailyCardRecord>, db: Database, onEdit
 @Composable
 internal fun DailyCardReveal(record: DailyCardRecord, db: Database, onEdit: (String) -> Unit) {
     var open by remember(record.date) { mutableStateOf(false) }
+    val interaction = remember(record.date) { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val reducedMotion = LocalReducedMotion.current
+    val scale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (pressed && !reducedMotion) .985f else 1f,
+        animationSpec = spring(dampingRatio = AppMotion.Damping, stiffness = AppMotion.Stiffness),
+        label = "daily-card-press",
+    )
     val day = remember(record.date) {
         LocalDate.parse(record.date).format(DateTimeFormatter.ofPattern("M月d日 · E", Locale.CHINA))
     }
     val reveal = remember(record.date) { MutableTransitionState(false).apply { targetState = true } }
-    AnimatedVisibility(visibleState = reveal, enter = fadeIn(tween(motionMillis(300)))) {
+    val revealEnter = if (reducedMotion) {
+        fadeIn(tween(0))
+    } else {
+        fadeIn(tween(AppMotion.Standard, easing = AppMotion.Ease)) +
+            slideInVertically(spring(dampingRatio = .92f, stiffness = 420f)) { it / 36 } +
+            scaleIn(spring(dampingRatio = .94f, stiffness = 420f), initialScale = .985f)
+    }
+    AnimatedVisibility(visibleState = reveal,
+        enter = revealEnter,
+    ) {
     Surface(
         onClick = { open = true },
         color = AppColors.Paper,
         contentColor = AppColors.PaperInk,
         shape = MaterialTheme.shapes.small,
-        modifier = Modifier.fillMaxWidth(),
+        interactionSource = interaction,
+        modifier = Modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale },
     ) {
         Row(Modifier.padding(AppSpace.Medium), horizontalArrangement = Arrangement.spacedBy(AppSpace.Medium),
             verticalAlignment = Alignment.CenterVertically) {
             if (record.visual == "illustration") Image(painterResource(record.edition.artwork), contentDescription = null,
                 modifier = Modifier.size(width = 62.dp, height = 48.dp), contentScale = ContentScale.Crop)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(AppSpace.Tiny)) {
-                Text("每日纪念", style = MaterialTheme.typography.titleMedium)
+                Text("今日纪念", style = MaterialTheme.typography.titleMedium)
                 Text(day, style = MaterialTheme.typography.labelMedium, color = AppColors.PaperMuted)
             }
-            Text("查看", style = MaterialTheme.typography.labelLarge)
+            Text("回看", style = MaterialTheme.typography.labelLarge)
         }
     }
     }
