@@ -270,11 +270,6 @@ private fun GritTaskListCard(
         animationSpec = tween(260),
         label = "grit-task-title-color",
     )
-    val titleSize by animateFloatAsState(
-        if (task.done) 20f else 18f,
-        animationSpec = tween(260, easing = AppMotion.Ease),
-        label = "grit-task-title-size",
-    )
     val metadataColor by animateColorAsState(
         if (task.done) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .64f)
         else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -340,7 +335,7 @@ private fun GritTaskListCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodyLarge.copy(
-                            fontSize = titleSize.sp,
+                            fontSize = 18.sp,
                             fontFamily = gritFontRounded(),
                             fontWeight = FontWeight.Bold,
                         ),
