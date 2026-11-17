@@ -28,6 +28,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -148,7 +149,7 @@ internal fun GritTaskListPage(
             Text(
                 "今日任务",
                 modifier = Modifier.fillMaxWidth(),
-                style = MaterialTheme.typography.headlineLarge.copy(fontFamily = gritFontEmphasis()),
+                style = MaterialTheme.typography.headlineLarge.copy(fontSize = 28.sp, fontWeight = FontWeight.Bold),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -156,7 +157,7 @@ internal fun GritTaskListPage(
                 Text(
                     "$completed/${tasks.size} 已完成",
                     modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = gritFontRounded()),
+                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 22.sp, fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 TextButton(onClick = onPlan) { Text("计划管理") }
@@ -225,6 +226,7 @@ internal fun GritTaskListPage(
 private fun GritFilterButton(selected: Boolean, text: String, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
+        modifier = Modifier.clip(RoundedCornerShape(50)).immediatePress(),
         shape = RoundedCornerShape(50),
         color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
         contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -277,39 +279,7 @@ private fun GritTaskListCard(
         label = "grit-task-metadata-color",
     )
     Card(
-        modifier = Modifier
-            .semantics {
-                role = Role.Button
-                onClick(label = "查看任务详情") { onDetails(task); true }
-                onLongClick(label = "打开任务操作") { menuExpanded = true; true }
-            }
-            .pointerInput(task.id) {
-                val menuAreaPx = 56.dp.toPx()
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    if (down.position.x < size.width - menuAreaPx) {
-                        var tracking = true
-                        while (tracking) {
-                            val event = awaitPointerEvent(PointerEventPass.Main)
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            val dx = change.position.x - down.position.x
-                            val dy = change.position.y - down.position.y
-                            if (dx * dx + dy * dy > viewConfiguration.touchSlop * viewConfiguration.touchSlop) {
-                                tracking = false
-                            } else if (!change.pressed) {
-                                val heldMillis = change.uptimeMillis - down.uptimeMillis
-                                if (heldMillis >= viewConfiguration.longPressTimeoutMillis) {
-                                    menuExpanded = true
-                                } else {
-                                    onDetails(task)
-                                }
-                                tracking = false
-                            }
-                        }
-                    }
-                }
-            }
-            .animateContentSize(motionSizeSpec()),
+        modifier = Modifier.animateContentSize(motionSizeSpec()),
         colors = CardDefaults.cardColors(containerColor = cardBackground, contentColor = cardContent),
         shape = shape,
     ) {
@@ -318,46 +288,50 @@ private fun GritTaskListCard(
         // in force; the row keeps Grit's status, title, supporting line, and
         // trailing action hierarchy.
         Row(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+            Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.White.copy(alpha = .08f), Color.Transparent)))
+                .border(.7.dp, AppColors.Border.copy(alpha = .45f), shape).padding(end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            Row(Modifier.weight(1f).clip(shape).immediatePress().combinedClickable(
+                onClickLabel = "查看任务详情", onLongClickLabel = "打开任务操作",
+                onClick = { onDetails(task) }, onLongClick = { menuExpanded = true },
+            ).padding(start = 16.dp, top = 14.dp, bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             CompletionMark(task.done)
             Column(
-                Modifier.weight(1f).padding(vertical = 14.dp),
+                Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                var titleLineRight by remember(task.id) { mutableStateOf(0f) }
-                var titleLineCenter by remember(task.id) { mutableStateOf(0f) }
+                var titleLines by remember(task.id) { mutableStateOf(emptyList<Pair<Float, Float>>()) }
                 Box(Modifier.fillMaxWidth()) {
                     Text(
                         task.title,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodyLarge.copy(
-                            fontSize = 18.sp,
-                            fontFamily = gritFontRounded(),
-                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
                         ),
                         color = titleColor,
                         onTextLayout = { layout ->
-                            if (layout.lineCount > 0) {
-                                titleLineRight = layout.getLineRight(0)
-                                titleLineCenter = (layout.getLineTop(0) + layout.getLineBottom(0)) / 2f
-                            }
+                            val lines = (0 until layout.lineCount).map { layout.getLineRight(it) to (layout.getLineTop(it) + layout.getLineBottom(it)) / 2f }
+                            if (titleLines != lines) titleLines = lines
                         },
                     )
                     if (task.done && strikeProgress.value > 0f) {
                         Canvas(Modifier.matchParentSize()) {
-                            val endX = (titleLineRight * strikeProgress.value).coerceIn(0f, size.width)
-                            if (endX > 0f) {
+                            var remaining = titleLines.sumOf { it.first.toDouble() }.toFloat() * strikeProgress.value
+                            titleLines.forEach { (width, center) ->
+                              val endX = remaining.coerceIn(0f, width)
+                              if (endX > 0f) {
                                 drawLine(
                                     color = titleColor.copy(alpha = minOf(titleColor.alpha + .12f, 1f)),
-                                    start = Offset(0f, titleLineCenter),
-                                    end = Offset(endX, titleLineCenter),
+                                    start = Offset(0f, center),
+                                    end = Offset(endX, center),
                                     strokeWidth = 1.7.dp.toPx(),
                                     cap = androidx.compose.ui.graphics.StrokeCap.Round,
                                 )
+                              }
+                              remaining -= width
                             }
                         }
                     }
@@ -372,13 +346,14 @@ private fun GritTaskListCard(
                         append(if (task.required) "必做" else "选做")
                         append(" · ")
                         append(target)
-                        if (reward.isNotEmpty()) append(" · 完成可得 $reward")
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = metadataColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (reward.isNotEmpty()) Text("完成可得 $reward", style = MaterialTheme.typography.labelSmall, color = metadataColor)
+            }
             }
             Box {
                 IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(40.dp).semantics { contentDescription = "任务操作" }) {

@@ -45,6 +45,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -203,7 +204,7 @@ fun TaskDetailSheet(
                 }
 
                 androidx.compose.material3.HorizontalDivider(color = AppColors.Border)
-                TextButton(onClick = { checking = !checking }) { Text(if (checking) "收起完成确认" else "完成自检") }
+                TextButton(onClick = { checking = !checking }, modifier = Modifier.clip(RoundedCornerShape(50)).immediatePress()) { Text(if (checking) "收起完成确认" else "完成自检") }
                 AnimatedVisibility(
                     checking,
                     enter = expandVertically(tween(motionMillis())) + fadeIn(tween(motionMillis())),
@@ -219,7 +220,7 @@ fun TaskDetailSheet(
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             checking = false
                             onChanged()
-                        }, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(if(task.date<db.day())"确认补记完成" else "确认完成任务") }
+                        }, modifier = Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(50)).immediatePress(canComplete)) { Text(if(task.date<db.day())"确认补记完成" else "确认完成任务") }
                         Text(
                             when {
                                 elapsed < task.minutes * 60_000L -> "还需专注 ${focusDuration((task.minutes * 60_000L - elapsed).coerceAtLeast(0))}"

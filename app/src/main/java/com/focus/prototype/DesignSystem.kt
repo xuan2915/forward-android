@@ -121,13 +121,9 @@ fun QuietSurface(modifier: Modifier = Modifier, color:Color = MaterialTheme.colo
 @Composable
 fun PrimaryAction(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, icon: (@Composable () -> Unit)? = null) {
     val haptic = LocalHapticFeedback.current
-    val interaction=remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if(pressed && !LocalReducedMotion.current) .975f else 1f,spring(dampingRatio=AppMotion.Damping,stiffness=AppMotion.Stiffness),label="press")
     Button(
-        interactionSource=interaction,
         onClick = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onClick() },
-        modifier = modifier.height(52.dp).graphicsLayer { scaleX=scale;scaleY=scale },
+        modifier = modifier.height(52.dp).clip(RoundedCornerShape(AppShape.Control)).immediatePress(enabled),
         enabled = enabled,
         shape = RoundedCornerShape(AppShape.Control),
         colors = ButtonDefaults.buttonColors(
@@ -143,7 +139,7 @@ fun PrimaryAction(label: String, onClick: () -> Unit, modifier: Modifier = Modif
 fun SecondaryAction(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier.height(48.dp),
+        modifier = modifier.height(48.dp).clip(RoundedCornerShape(AppShape.Control)).immediatePress(enabled),
         enabled = enabled,
         shape = RoundedCornerShape(AppShape.Control),
         border = BorderStroke(1.dp, if (enabled) AppColors.Border else AppColors.Raised),

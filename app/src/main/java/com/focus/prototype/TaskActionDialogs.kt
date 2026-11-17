@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -29,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
 import java.time.LocalDate
 
@@ -48,11 +50,11 @@ fun TaskMoveDialog(task:Task,db:Database,onDismiss:()->Unit,onMoved:(String)->Un
     var error by remember(task.id){mutableStateOf("")}
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha=0.58f)).clickable(onClick=onDismiss), contentAlignment=Alignment.Center) {
         Surface(
-            modifier=Modifier.fillMaxWidth().padding(horizontal=18.dp).heightIn(max=700.dp).clickable(onClick={}),
+            modifier=Modifier.fillMaxWidth().padding(horizontal=18.dp).heightIn(max=700.dp).border(.7.dp, AppColors.Border.copy(alpha=.45f), MaterialTheme.shapes.extraLarge).clickable(onClick={}),
             shape=MaterialTheme.shapes.extraLarge,
             color=MaterialTheme.colorScheme.surfaceContainerLow,
         ) {
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.background(Brush.verticalGradient(listOf(Color.White.copy(alpha=.08f), Color.Transparent))).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 Text("选择新的任务日期", style=MaterialTheme.typography.titleMedium)
                 DatePicker(state, showModeToggle=false)
                 if(reasonRequired) OutlinedTextField(reason,onValueChange={reason=it},label={Text("计划变更原因")},modifier=Modifier.fillMaxWidth())
@@ -73,11 +75,11 @@ fun TaskDeleteDialog(task:Task,db:Database,onDismiss:()->Unit,onDeleted:()->Unit
     var reason by remember(task.id){mutableStateOf("")}
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha=0.58f)).clickable(onClick=onDismiss), contentAlignment=Alignment.Center) {
         Surface(
-            modifier=Modifier.fillMaxWidth().padding(horizontal=24.dp).clickable(onClick={}),
+            modifier=Modifier.fillMaxWidth().padding(horizontal=24.dp).border(.7.dp, AppColors.Border.copy(alpha=.45f), MaterialTheme.shapes.extraLarge).clickable(onClick={}),
             shape=MaterialTheme.shapes.extraLarge,
             color=MaterialTheme.colorScheme.surfaceContainerLow,
         ) {
-            Column(Modifier.padding(20.dp), verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.background(Brush.verticalGradient(listOf(Color.White.copy(alpha=.08f), Color.Transparent))).padding(20.dp), verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 Text("删除这项任务？", style=MaterialTheme.typography.titleLarge)
                 Text(if(reasonRequired) "删除未完成记录 · 已确认的计划会保留变更原因" else "只删除未完成记录")
                 if(reasonRequired) OutlinedTextField(reason,onValueChange={reason=it},label={Text("删除原因")},modifier=Modifier.fillMaxWidth())

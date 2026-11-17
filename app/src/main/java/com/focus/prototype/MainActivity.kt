@@ -30,6 +30,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -73,7 +74,6 @@ class MainActivity : ComponentActivity() {
     // Keep navigation alive while this Activity is backgrounded; a fresh Activity follows its launch intent.
     var page by remember { mutableIntStateOf(initialNavigation.page) }; var planManagement by remember { mutableStateOf(initialNavigation.openPlanManagement) }; var planSection by remember { mutableStateOf<String?>(if(initialNavigation.openPlanManagement) "import" else null) }; var settingsSection by remember { mutableStateOf<String?>(null) }; var editor by remember { mutableStateOf(false) };var showAllRewardHistory by remember { mutableStateOf(false) };var rewardControlsExpanded by remember { mutableStateOf(false) };var selectedRewardRecord by remember { mutableStateOf<String?>(null) };var taskFilter by remember { mutableIntStateOf(0) }
     var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }; var editingTaskId by remember { mutableStateOf<String?>(null) };var movingTask by remember { mutableStateOf<Task?>(null) };var deletingTask by remember { mutableStateOf<Task?>(null) };var allAchievements by remember { mutableStateOf(false) }; var newAchievement by remember { mutableStateOf(nextUnseenAchievement(db)) }; var gritAnalyticsTaskId by remember { mutableStateOf<String?>(null) }; var dailyCardDate by remember { mutableStateOf<String?>(null) }; var dailyCardOpenDate by remember { mutableStateOf<String?>(null) }
-    val taskActionScope = rememberCoroutineScope()
     fun dismissTaskActions() { movingTask=null; deletingTask=null }
    LaunchedEffect(shareVersion) { if(shareVersion>0) { page=0;planManagement=true;planSection="import";settingsSection=null;editor=false } }
    LaunchedEffect(Unit) { while(true) { db.settleToday();focusTimer.advance();if(now%10L==0L)db.checkpoint();now++; delay(1000) } }
@@ -103,8 +103,8 @@ class MainActivity : ComponentActivity() {
         onPlan={dismissTaskActions();planManagement=true}, onSettings={dismissTaskActions();settingsSection=null;page=5},
         onDetails={taskDetailsId=it.id},
         onEdit={editingTaskId=it.id;taskDetailsId=it.id},
-        onMove={task->taskActionScope.launch { delay(200); movingTask=task }},
-        onDelete={task->taskActionScope.launch { delay(200); deletingTask=task }},
+        onMove={task->movingTask=task},
+        onDelete={task->deletingTask=task},
         onEditDailyCard={date->DailyCards.markRevealSeen(db,date);dailyCardDate=date;refresh++},
        )
       } else if (!editor && screen == 2 && allAchievements) {
@@ -269,7 +269,7 @@ internal fun focusDuration(milliseconds:Long):String = when {
   Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)) { listOf("行动型","成果型","掌握型").forEach { type -> FilterChip(selected=mode==type,onClick={mode=type},label={Text(type)},modifier=Modifier.weight(1f)) } }
   OutlinedTextField(checklist,onValueChange={checklist=it},label={Text(when(mode){"成果型"->"成果验收条件";"掌握型"->"独立掌握标准";else->"完成后自检条件"})},modifier=Modifier.fillMaxWidth(),minLines=1,maxLines=3)
   androidx.compose.material3.HorizontalDivider(color=AppColors.Border)
-  TextButton(onClick={repeatExpanded=!repeatExpanded},modifier=Modifier.fillMaxWidth()) { Text("重复计划 · $repeatLabel${if(repeatExpanded)"  −" else "  +"}") }
+  TextButton(onClick={repeatExpanded=!repeatExpanded},modifier=Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).immediatePress()) { Text("重复计划 · $repeatLabel${if(repeatExpanded)"  −" else "  +"}") }
   AnimatedVisibility(repeatExpanded) {
    Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
@@ -280,7 +280,7 @@ internal fun focusDuration(milliseconds:Long):String = when {
     Row(verticalAlignment=Alignment.CenterVertically) { FilterChip(selected=recurrence.startsWith("interval:"),onClick={recurrence="interval:${intervalDays.toIntOrNull()?.coerceIn(1,365)?:3}"},label={Text("自定义间隔")});if(recurrence.startsWith("interval:")){Spacer(Modifier.width(8.dp));NumberField("间隔天数",intervalDays){intervalDays=it;recurrence="interval:${it.toIntOrNull()?.coerceIn(1,365)?:1}"}} }
    }
   }
-  TextButton(onClick={rewardsExpanded=!rewardsExpanded},modifier=Modifier.fillMaxWidth()) { Text("奖励设置 · 视频 $video 分钟，游戏 $games 局${if(rewardsExpanded)"  −" else "  +"}") }
+  TextButton(onClick={rewardsExpanded=!rewardsExpanded},modifier=Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).immediatePress()) { Text("奖励设置 · 视频 $video 分钟，游戏 $games 局${if(rewardsExpanded)"  −" else "  +"}") }
   AnimatedVisibility(rewardsExpanded) {
    Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
     Text(if(required)"必做任务完成后发放" else "选做任务完成后可选领取",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
@@ -289,7 +289,8 @@ internal fun focusDuration(milliseconds:Long):String = when {
    }
   }
   Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-   Button(enabled=title.isNotBlank() && recurrence!="days:" && (!recurrence.startsWith("interval:") || (intervalDays.toIntOrNull()?:0) in 1..365) && (!db.contract(day).confirmed || !required),onClick={ db.addTask(day,title,required,minutes.toIntOrNull()?:0,mode,checklist,video.toIntOrNull()?:0,games.toIntOrNull()?:0,recurrence); onSave() },modifier=Modifier.weight(1f).heightIn(min=48.dp)) {Text("保存任务")}
+   val canSave=title.isNotBlank() && recurrence!="days:" && (!recurrence.startsWith("interval:") || (intervalDays.toIntOrNull()?:0) in 1..365) && (!db.contract(day).confirmed || !required)
+   Button(enabled=canSave,onClick={ db.addTask(day,title,required,minutes.toIntOrNull()?:0,mode,checklist,video.toIntOrNull()?:0,games.toIntOrNull()?:0,recurrence); onSave() },modifier=Modifier.weight(1f).heightIn(min=48.dp).clip(RoundedCornerShape(50)).immediatePress(canSave)) {Text("保存任务")}
    TextButton(onClick=onCancel,modifier=Modifier.heightIn(min=48.dp)){Text("取消")}
   }
  }
