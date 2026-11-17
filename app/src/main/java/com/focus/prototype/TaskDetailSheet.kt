@@ -117,7 +117,7 @@ fun TaskDetailSheet(
                     }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(if (task.required) "必做任务" else "选做任务", style = MaterialTheme.typography.labelLarge, color = AppColors.Muted)
+                    Text(if (!task.typeKnown) "任务类型待确认" else if (task.required) "必做任务" else "选做任务", style = MaterialTheme.typography.labelLarge, color = AppColors.Muted)
                     Text(task.title, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold))
                 }
                 StatusPill(when {
@@ -126,6 +126,15 @@ fun TaskDetailSheet(
                     paused -> "已暂停"
                     else -> "待开始"
                 }, active = task.done || active)
+            }
+
+            if (task.historySource.isNotBlank()) Text("人工重建 · ${task.historySource} · ${task.historyConfidence}", style=MaterialTheme.typography.bodySmall, color=AppColors.Muted)
+            if (!task.typeKnown) {
+                Text("这项历史任务的类型未知，确认后可能改变当天统计。", style=MaterialTheme.typography.bodySmall, color=AppColors.Muted)
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick={db.confirmHistoricalType(task,true);onChanged()}) { Text("确认为必做") }
+                    TextButton(onClick={db.confirmHistoricalType(task,false);onChanged()}) { Text("确认为选做") }
+                }
             }
 
             if(!task.done && task.date<db.day()) Text("历史任务 · 计划日 ${task.date} · 补记仍需满足原验收条件",style=MaterialTheme.typography.bodySmall,color=AppColors.Accent)
@@ -137,7 +146,7 @@ fun TaskDetailSheet(
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(if (task.minutes > 0) "${focusDuration(elapsed)} / ${task.minutes} 分钟" else focusDuration(elapsed), style = MaterialTheme.typography.titleMedium)
+                    Text(if (!task.elapsedKnown) "时长未知" else if (task.minutes > 0) "${focusDuration(elapsed)} / ${task.minutes} 分钟" else focusDuration(elapsed), style = MaterialTheme.typography.titleMedium)
                     Text("专注记录", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -165,7 +174,7 @@ fun TaskDetailSheet(
             if (task.done) {
                 if (task.required && (task.rewardMinutes>0 || task.rewardGames>0)) {
                     Text("本项奖励已自动到账："+buildList{if(task.rewardMinutes>0)add("${task.rewardMinutes} 分钟");if(task.rewardGames>0)add("${task.rewardGames} 局")}.joinToString(" · "),style=MaterialTheme.typography.bodyMedium,color=AppColors.Muted)
-                } else if (!task.required && !task.claimed && (task.rewardMinutes > 0 || task.rewardGames > 0)) {
+                } else if (task.typeKnown && !task.required && !task.claimed && (task.rewardMinutes > 0 || task.rewardGames > 0)) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("领取一项奖励", style = MaterialTheme.typography.titleMedium)
                         Text("每项选做奖励限领一次", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)

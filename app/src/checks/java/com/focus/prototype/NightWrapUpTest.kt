@@ -90,7 +90,7 @@ class NightWrapUpTest {
         try {
             assertEquals("yes", upgraded.setting("keep_me"))
             assertTrue(upgraded.nightViolations("2026-11-12").isEmpty())
-            assertEquals(7, upgraded.writableDatabase.version)
+            assertEquals(8, upgraded.writableDatabase.version)
         } finally {
             upgraded.close()
             context.deleteDatabase(name)

@@ -131,7 +131,7 @@ internal fun GritTaskListPage(
     val completed = tasks.count(Task::done)
     val filteredTasks = when (filter) {
         1 -> tasks.filter(Task::required)
-        2 -> tasks.filterNot(Task::required)
+        2 -> tasks.filter { it.typeKnown && !it.required }
         else -> tasks
     }
     Column(modifier.fillMaxSize()) {
@@ -343,7 +343,7 @@ private fun GritTaskListCard(
                 }.joinToString(" · ")
                 Text(
                     buildString {
-                        append(if (task.required) "必做" else "选做")
+                        append(if (!task.typeKnown) "类型待确认" else if (task.required) "必做" else "选做")
                         append(" · ")
                         append(target)
                     },
@@ -435,7 +435,7 @@ internal fun GritHabitAnalyticsPage(db: Database, taskId: String, refreshKey: In
                 GritWeeklyHeatMap(today, data.heatMap) { selectedDate = it }
                 val selected = data.days.firstOrNull { it.date == selectedDate }
                 Text(
-                    "${selectedDate.monthValue}月${selectedDate.dayOfMonth}日 · ${when { selected?.done == true -> "已完成"; selected != null -> "未完成"; else -> "未安排" }}${selected?.let { " · 专注 ${focusDuration(it.elapsed)}" }.orEmpty()}",
+                    "${selectedDate.monthValue}月${selectedDate.dayOfMonth}日 · ${when { selected?.done == true -> "已完成"; selected != null -> "未完成"; else -> "未安排" }}${selected?.let { if(it.elapsed == null) " · 专注时长未知" else " · 专注 ${focusDuration(it.elapsed)}" }.orEmpty()}",
                     modifier = Modifier.padding(start = 16.dp, top = 6.dp),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

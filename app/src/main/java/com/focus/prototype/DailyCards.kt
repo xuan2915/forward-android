@@ -460,7 +460,7 @@ internal fun DailyCardEditor(db: Database, date: String, tasks: List<Task>, onDi
                         tasks.forEach { task ->
                             Row(Modifier.fillMaxWidth().clickable { selectedIds = if (task.id in selectedIds) selectedIds - task.id else selectedIds + task.id }, verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(task.id in selectedIds, onCheckedChange = { checked -> selectedIds = if (checked) selectedIds + task.id else selectedIds - task.id })
-                                Column { Text(task.title, style = MaterialTheme.typography.bodyMedium); Text("已完成 · 专注 ${task.elapsed / 60000} 分钟", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted) }
+                                Column { Text(task.title, style = MaterialTheme.typography.bodyMedium); Text(if(task.elapsedKnown) "已完成 · 专注 ${task.elapsed / 60000} 分钟" else "已完成 · 专注时长未知", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted) }
                             }
                         }
                         OutlinedTextField(value = note, onValueChange = { note = it.take(500) }, label = { Text("今天有什么值得留下？") }, modifier = Modifier.fillMaxWidth(), minLines = 3)

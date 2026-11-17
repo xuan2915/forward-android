@@ -14,7 +14,7 @@ package com.focus.prototype
 import java.time.DayOfWeek
 import java.time.LocalDate
 
-internal data class GritHabitDay(val date: LocalDate, val done: Boolean, val elapsed: Long)
+internal data class GritHabitDay(val date: LocalDate, val done: Boolean, val elapsed: Long?)
 
 internal data class GritHabitData(
     val taskId: String,
@@ -56,11 +56,11 @@ internal fun gritHabitData(db: Database, taskId: String): GritHabitData? {
     ).use { cursor ->
         while (cursor.moveToNext()) {
             val date = LocalDate.parse(cursor.getString(0))
-            instances[date] = GritHabitDay(date, cursor.getInt(1) != 0, cursor.getLong(2))
+            instances[date] = GritHabitDay(date, cursor.getInt(1) != 0, if(cursor.isNull(2)) null else cursor.getLong(2))
         }
     }
     if (instances.isEmpty()) {
-        instances[LocalDate.parse(task.date)] = GritHabitDay(LocalDate.parse(task.date), task.done, task.elapsed)
+        instances[LocalDate.parse(task.date)] = GritHabitDay(LocalDate.parse(task.date), task.done, task.elapsed.takeIf { task.elapsedKnown })
     }
 
     val scheduled = mutableListOf<GritHabitDay>()
@@ -80,7 +80,7 @@ internal fun gritHabitData(db: Database, taskId: String): GritHabitData? {
     val (best, current) = countGritStreaks(completedDates, scheduled.map(GritHabitDay::date), today)
     val consistency = if (scheduled.isEmpty()) 0f else completedDates.size.toFloat() / scheduled.size
     val description = buildString {
-        append(if (task.required) "必做" else "选做")
+        append(if (!task.typeKnown) "类型待确认" else if (task.required) "必做" else "选做")
         append(" · ")
         append(if (task.minutes > 0) "${task.minutes} 分钟" else "自由专注")
         append(" · ")

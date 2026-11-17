@@ -38,6 +38,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -45,6 +47,7 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
  private var refresh by mutableIntStateOf(0)
  private var shareVersion by mutableIntStateOf(0)
+ private var resumeVersion by mutableIntStateOf(0)
  private fun receiveText(intent: Intent): Boolean {
   if(intent.action != Intent.ACTION_SEND || intent.type != "text/plain") return false
   val text=intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty()
@@ -54,7 +57,7 @@ class MainActivity : ComponentActivity() {
   return text.isNotBlank()
  }
  override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); if(receiveText(intent)) shareVersion++; refresh++ }
- override fun onResume() { super.onResume(); refresh++;runCatching { Database(this).use { NightWrapUpScheduler.reschedule(this,it) } } }
+ override fun onResume() { super.onResume(); refresh++;resumeVersion++;runCatching { Database(this).use { NightWrapUpScheduler.reschedule(this,it) } } }
  override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState)
   val initialNavigation = resolveInitialNavigation(
    action = intent.action,
@@ -76,6 +79,7 @@ class MainActivity : ComponentActivity() {
     var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }; var editingTaskId by remember { mutableStateOf<String?>(null) };var movingTask by remember { mutableStateOf<Task?>(null) };var deletingTask by remember { mutableStateOf<Task?>(null) };var allAchievements by remember { mutableStateOf(false) }; var newAchievement by remember { mutableStateOf(nextUnseenAchievement(db)) }; var gritAnalyticsTaskId by remember { mutableStateOf<String?>(null) }; var dailyCardDate by remember { mutableStateOf<String?>(null) }; var dailyCardOpenDate by remember { mutableStateOf<String?>(null) }
     fun dismissTaskActions() { movingTask=null; deletingTask=null }
    LaunchedEffect(shareVersion) { if(shareVersion>0) { page=0;planManagement=true;planSection="import";settingsSection=null;editor=false } }
+   LaunchedEffect(resumeVersion) { if (IndependentBackup.due(this@MainActivity)) withContext(Dispatchers.IO) { runCatching { IndependentBackup.save(this@MainActivity, db) }.onFailure { IndependentBackup.failed(this@MainActivity, it) } } }
    LaunchedEffect(Unit) { while(true) { db.settleToday();focusTimer.advance();if(now%10L==0L)db.checkpoint();now++; delay(1000) } }
    val tick = now + refresh; val today = db.day(); val c = remember(today,tick) { db.contract(today) }; val tasks = remember(today,refresh) { db.tasks(today) }; val continuing = remember(today,refresh) { db.runningTasks().filter { it.date != today } }
    var dailyCardRecords by remember { mutableStateOf(emptyList<DailyCardRecord>()) }
@@ -152,7 +156,7 @@ class MainActivity : ComponentActivity() {
          Text("游戏已获 ${games.earned} 局 · 已用 ${games.used} 局 · 每日 00:00 更新，额度 ${db.setting("boundary","4").padStart(2,'0')}:00 结算",style=MaterialTheme.typography.labelSmall,color=AppColors.Quiet)
          if(games.remaining > 0) TextButton(onClick={db.consume("game",1); refresh++}) { Text("手动记录已使用一局") }
         } }
-        items(tasks.filter{!it.required && it.done && !it.claimed},key={it.id}) { task -> CardBlock { Text("${task.title} · 领取一项奖励"); Row { if(task.rewardMinutes>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"video");refresh++}) {Text("${task.rewardMinutes} 分钟视频")}; if(task.rewardGames>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"game");refresh++}) {Text("${task.rewardGames} 局游戏") } }; if(!db.eligible()) Text("完成今日必做任务后可领取",color=AppColors.Muted) } }
+        items(tasks.filter{it.typeKnown && !it.required && it.done && !it.claimed},key={it.id}) { task -> CardBlock { Text("${task.title} · 领取一项奖励"); Row { if(task.rewardMinutes>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"video");refresh++}) {Text("${task.rewardMinutes} 分钟视频")}; if(task.rewardGames>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"game");refresh++}) {Text("${task.rewardGames} 局游戏") } }; if(!db.eligible()) Text("完成今日必做任务后可领取",color=AppColors.Muted) } }
         item { TextButton(onClick={rewardControlsExpanded=!rewardControlsExpanded},modifier=Modifier.animateContentSize()) {Text(if(rewardControlsExpanded) "收起其他操作" else "应用保护与其他操作") } }
         if(rewardControlsExpanded) item { CardBlock {
          if(!c.emergency) EmergencyUnlock(db){refresh++} else TextButton(onClick={db.resumeProtection();refresh++}){Text("恢复应用保护")}
@@ -187,7 +191,7 @@ class MainActivity : ComponentActivity() {
           "reward" -> item { DaySettings(db){refresh++} }
           "sleep" -> item { NightWrapUpCard(db,refresh){refresh++} }
           "backup" -> item { BackupView(db,{refresh++},{focusTimer.resetAfterRestore()}) }
-          else -> item { CardBlock { Text("向前",style=MaterialTheme.typography.titleLarge);Text("版本 ${BuildConfig.VERSION_NAME}",color=AppColors.Muted);Text("任务、专注与成长记录",color=AppColors.Muted) } }
+          else -> item { CardBlock { Text("向前",style=MaterialTheme.typography.titleLarge);Text("版本 ${BuildConfig.VERSION_NAME}",color=AppColors.Muted);Text("任务、专注与成长记录",color=AppColors.Muted); if(BuildConfig.DEBUG && runCatching { Class.forName("com.focus.prototype.DesignLabActivity") }.isSuccess) TextButton(onClick={startActivity(Intent().setClassName(this@MainActivity, "com.focus.prototype.DesignLabActivity"))}) { Text("设计实验室（Debug）") } } }
          }
         }
       }

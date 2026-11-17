@@ -21,6 +21,7 @@ internal data class BackupPreview(
     val days: Int,
     val rewardRecords: Int,
     val attachments: Int,
+    val focusRecords: Int,
     val sleepRecords: Int,
     val xp: Int,
 )
@@ -94,12 +95,21 @@ object Backup {
         val payloadText = payload.toString()
         val createdAt = System.currentTimeMillis()
         val databaseVersion = sql.version
+        val taskRows = data.getJSONArray("tasks")
+        val completedCount = (0 until taskRows.length()).count { taskRows.getJSONObject(it).optInt("done") != 0 }
+        val movedRows = data.optJSONArray("task_moves") ?: JSONArray()
+        val movedIds = (0 until movedRows.length()).map { movedRows.getJSONObject(it).optString("source_id") }.toSet()
+        val xpCount = (0 until taskRows.length()).count { taskRows.getJSONObject(it).optInt("done") != 0 && taskRows.getJSONObject(it).optString("id") !in movedIds }
+        val counts = JSONObject().put("tasks", taskRows.length()).put("completed", completedCount)
+            .put("xp", xpCount * 100).put("focusRecords", (0 until taskRows.length()).count { taskRows.getJSONObject(it).optLong("elapsed") > 0 })
+            .put("rewardRecords", data.getJSONArray("ledger").length()).put("attachments", assets.length())
         return JSONObject()
             .put("format", FORMAT)
             .put("version", CURRENT_VERSION)
             .put("createdAt", createdAt)
             .put("appVersion", BuildConfig.VERSION_NAME)
             .put("databaseVersion", databaseVersion)
+            .put("counts", counts)
             .put("payload", payloadText)
             .put("sha256", sha256(payloadText.toByteArray(Charsets.UTF_8)))
             .toString()
@@ -108,7 +118,10 @@ object Backup {
     internal fun inspect(text: String): BackupPreview {
         val parsed = parse(text)
         val tasks = parsed.data.optJSONArray("tasks") ?: JSONArray()
+        val moved = parsed.data.optJSONArray("task_moves") ?: JSONArray()
+        val movedSources = (0 until moved.length()).map { moved.getJSONObject(it).optString("source_id") }.toSet()
         val completed = (0 until tasks.length()).count { tasks.getJSONObject(it).optInt("done") != 0 }
+        val xpTasks = (0 until tasks.length()).count { tasks.getJSONObject(it).optInt("done") != 0 && tasks.getJSONObject(it).optString("id") !in movedSources }
         val settings = parsed.data.optJSONArray("settings") ?: JSONArray()
         val sleepRecords = (0 until settings.length()).count { settings.getJSONObject(it).optString("key").startsWith("sleep_record_") }
         return BackupPreview(
@@ -122,8 +135,9 @@ object Backup {
             days = parsed.data.optJSONArray("contracts")?.length() ?: 0,
             rewardRecords = parsed.data.optJSONArray("ledger")?.length() ?: 0,
             attachments = parsed.assets.size,
+            focusRecords = (0 until tasks.length()).count { tasks.getJSONObject(it).optLong("elapsed") > 0 },
             sleepRecords = sleepRecords,
-            xp = completed * 100,
+            xp = xpTasks * 100,
         )
     }
 
@@ -173,6 +187,15 @@ object Backup {
                         }
                         when (table) {
                             "tasks" -> {
+                                if (!row.has("type_known")) {
+                                    val note = row.optString("checklist")
+                                    if (note.contains("根据复盘") && note.contains("重建")) {
+                                        values.put("history_source", if(note.contains("截图")) "每日复盘、截图" else "每日复盘")
+                                        values.put("history_confidence", "部分确认")
+                                        if (row.optInt("required")==0 && note.contains("任务类型") && note.contains("未知")) values.put("type_known",0)
+                                        if (row.optLong("elapsed")==0L && note.contains("时长") && note.contains("未知")) values.putNull("elapsed")
+                                    }
+                                }
                                 val oldPath = values.getAsString("evidence").orEmpty()
                                 values.put("evidence", if (oldPath.isBlank() || oldPath.startsWith("proof-submitted:")) oldPath else restoredPaths[oldPath] ?: error("任务证明文件缺失：${File(oldPath).name}"))
                                 values.put("running_since", 0L)

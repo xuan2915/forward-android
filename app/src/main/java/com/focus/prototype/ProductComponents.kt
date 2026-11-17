@@ -108,6 +108,8 @@ private data class GrowthSnapshot(val planDays: Int, val achievedDays: Int, val 
   }
   GrowthFeedback()
   GritGrowthStats(snapshot,onAllAchievements)
+  val unknownDurations = remember(db,refreshKey) { db.readableDatabase.rawQuery("SELECT COUNT(*) FROM tasks WHERE elapsed IS NULL",null).use { it.moveToFirst(); it.getInt(0) } }
+  if(unknownDurations>0) Text("部分历史任务时长未知，专注统计仅包含已知记录",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
  }
 }
 
