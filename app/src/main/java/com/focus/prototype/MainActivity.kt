@@ -104,7 +104,9 @@ class MainActivity : ComponentActivity() {
         dailyCard=dailyCardRecords.firstOrNull { it.date == today },
         continuing=continuing, filter=taskFilter,
         confirmed=c.confirmed,
-        onFilter={taskFilter=it}, onAdd={dismissTaskActions();targetDay=today;editor=true},
+        onFilter={next ->
+         if (next != taskFilter) { inlineTaskId = null; taskFilter = next }
+        }, onAdd={dismissTaskActions();targetDay=today;editor=true},
         onPlan={dismissTaskActions();planManagement=true}, onSettings={dismissTaskActions();settingsSection=null;page=5},
         onDetails={ if(detailMode=="inline") inlineTaskId=if(inlineTaskId==it.id) null else it.id else taskDetailsId=it.id },
         onEdit={inlineTaskId=null;editingTaskId=it.id;taskDetailsId=it.id},

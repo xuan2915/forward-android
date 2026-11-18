@@ -86,6 +86,15 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -148,12 +157,13 @@ internal fun GritTaskListPage(
     // Plan B: when a row opens low on screen, carry it toward the upper part of
     // the list while it grows, so the detail opens into view rather than below
     // the fold. The row travels with the expansion instead of jumping.
-    LaunchedEffect(expandedTaskId) {
+    val reduced = LocalReducedMotion.current
+    LaunchedEffect(expandedTaskId, reduced) {
         val id = expandedTaskId ?: return@LaunchedEffect
         val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id } ?: return@LaunchedEffect
         val anchor = with(density) { 8.dp.toPx() }
         if (info.offset > listState.layoutInfo.viewportSize.height * .3f || info.offset < 0) {
-            listState.animateScrollBy(info.offset - anchor, spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow))
+            if (!reduced) listState.animateScrollBy(info.offset - anchor, spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow))
         }
     }
     val completed = tasks.count(Task::done)
@@ -162,6 +172,11 @@ internal fun GritTaskListPage(
         2 -> tasks.filter { it.typeKnown && !it.required }
         else -> tasks
     }
+    // Inline detail owns its height animation. Keep lazy placement from animating the same shift.
+    val placeRows = !reduced && expandedTaskId == null
+    val enterRow = if (reduced) null else tween<Float>(AppMotion.Standard, easing = AppMotion.Ease)
+    val exitRow = if (reduced) null else tween<Float>(AppMotion.Short, easing = AppMotion.Ease)
+    val placeRow = if (placeRows) spring<IntOffset>(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow) else null
     Column(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 8.dp)) {
             Row(
@@ -193,15 +208,7 @@ internal fun GritTaskListPage(
             }
         }
 
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            content = {
-                listOf(0 to "全部", 1 to "必做", 2 to "选做").forEach { (value, label) ->
-                    GritFilterButton(value == filter, label) { onFilter(value) }
-                }
-            },
-        )
+        GritAnimatedTaskFilters(filter, onFilter)
 
         Box(Modifier.fillMaxSize()) {
             LazyColumn(
@@ -220,14 +227,14 @@ internal fun GritTaskListPage(
                         )
                     }
                     itemsIndexed(continuing, key = { _, task -> "continue-${task.id}" }) { index, task ->
-                        GritTaskListCard(task, index, continuing.size, onDetails, onEdit, onMove, onDelete)
+                        GritTaskListCard(task, index, continuing.size, onDetails, onEdit, onMove, onDelete, modifier = Modifier.animateItem(enterRow, placeRow, exitRow))
                     }
                 }
                 if (filteredTasks.isEmpty()) {
-                    item {
+                    item(key = "task-filter-empty") {
                         Text(
                             if (tasks.isEmpty()) "今天还没有任务，添加一项要完成的事" else "这个分类下还没有任务",
-                            modifier = Modifier.fillMaxWidth().padding(top = 150.dp, start = 12.dp, end = 12.dp),
+                            modifier = Modifier.animateItem(enterRow, null, exitRow).fillMaxWidth().padding(top = 150.dp, start = 12.dp, end = 12.dp),
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -236,7 +243,7 @@ internal fun GritTaskListPage(
                     itemsIndexed(filteredTasks, key = { _, task -> task.id }) { index, task ->
                         GritTaskListCard(
                             task, index, filteredTasks.size, onDetails, onEdit, onMove, onDelete,
-                            modifier = Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null),
+                            modifier = Modifier.animateItem(enterRow, placeRow, exitRow),
                             expanded = expandedTaskId == task.id,
                             dimmed = expandedTaskId != null && expandedTaskId != task.id,
                             joinedAbove = filteredTasks.getOrNull(index - 1)?.id.let { it == null || it != expandedTaskId },
@@ -280,15 +287,48 @@ private fun DetailModeToggle(mode: String, onMode: (String) -> Unit) {
 }
 
 @Composable
-private fun GritFilterButton(selected: Boolean, text: String, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.clip(RoundedCornerShape(50)).immediatePress(),
-        shape = RoundedCornerShape(50),
-        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-    ) {
-        Text(text, Modifier.padding(horizontal = 18.dp, vertical = 10.dp), style = MaterialTheme.typography.labelLarge)
+private fun GritAnimatedTaskFilters(filter: Int, onFilter: (Int) -> Unit) {
+    val bounds = remember { mutableStateMapOf<Int, Rect>() }
+    val target = bounds[filter]
+    val first = bounds[0]
+    val duration = motionMillis(AppMotion.Standard)
+    val x by animateFloatAsState(target?.left ?: 0f, tween(duration, easing = AppMotion.Ease), label = "filter-x")
+    val width by animateFloatAsState(target?.width ?: 0f, tween(duration, easing = AppMotion.Ease), label = "filter-width")
+    val track = MaterialTheme.colorScheme.surfaceContainerHigh
+    val active = MaterialTheme.colorScheme.primary
+    Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(
+            Modifier.drawBehind {
+                bounds.values.forEach { rect ->
+                    drawRoundRect(track, rect.topLeft, rect.size, CornerRadius(rect.height / 2))
+                }
+                if (first != null && width > 0f) {
+                    drawRoundRect(active, Offset(x, first.top), Size(width, first.height), CornerRadius(first.height / 2))
+                }
+            },
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            listOf("全部", "必做", "选做").forEachIndexed { index, label ->
+                val ink by animateColorAsState(
+                    if (index == filter) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    tween(duration, easing = AppMotion.Ease),
+                    label = "filter-ink",
+                )
+                Surface(
+                    onClick = { onFilter(index) },
+                    modifier = Modifier.onGloballyPositioned { coordinates ->
+                        val at = coordinates.positionInParent()
+                        val rect = Rect(at, Size(coordinates.size.width.toFloat(), coordinates.size.height.toFloat()))
+                        if (bounds[index] != rect) bounds[index] = rect
+                    }.clip(RoundedCornerShape(50)).immediatePress().semantics { selected = index == filter },
+                    shape = RoundedCornerShape(50),
+                    color = Color.Transparent,
+                    contentColor = ink,
+                ) {
+                    Text(label, Modifier.padding(horizontal = 18.dp, vertical = 10.dp), style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
     }
 }
 
@@ -318,13 +358,14 @@ private fun GritTaskListCard(
     val dim by animateFloatAsState(if (dimmed) 1f else 0f, tween(motionMillis()), label = "grit-row-dim")
     val topEdge by animateFloatAsState(if (index == 0 || expanded || !joinedAbove) 1f else 0f, liftSpec, label = "grit-row-top")
     val bottomEdge by animateFloatAsState(if (index == count - 1 || expanded || !joinedBelow) 1f else 0f, liftSpec, label = "grit-row-bottom")
-    val shape = if (count <= 1) detachedItemShape(26) else RoundedCornerShape(
+    val shape = RoundedCornerShape(
         topStart = (4 + 22 * topEdge).dp, topEnd = (4 + 22 * topEdge).dp,
         bottomStart = (4 + 22 * bottomEdge).dp, bottomEnd = (4 + 22 * bottomEdge).dp,
     )
     var menuExpanded by remember(task.id) { mutableStateOf(false) }
     var wasDone by remember(task.id) { mutableStateOf(task.done) }
     val strikeProgress = remember(task.id) { Animatable(if (task.done) 1f else 0f) }
+    val strikeDuration = motionMillis(380)
     LaunchedEffect(task.done) {
         val changed = wasDone != task.done
         wasDone = task.done
@@ -332,7 +373,7 @@ private fun GritTaskListCard(
             if (task.done) strikeProgress.snapTo(0f)
             strikeProgress.animateTo(
                 if (task.done) 1f else 0f,
-                animationSpec = tween(380, easing = AppMotion.Ease),
+                animationSpec = tween(strikeDuration, easing = AppMotion.Ease),
             )
         }
     }
