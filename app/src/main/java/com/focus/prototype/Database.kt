@@ -508,9 +508,9 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
  fun audit(day: String, detail: String) { writableDatabase.insert("audit",null,cv("id" to UUID.randomUUID().toString(),"day" to day,"detail" to detail,"created" to System.currentTimeMillis())) }
  fun review(day: String, problem: String, praise: String, note: String) { writableDatabase.insertWithOnConflict("reviews",null,cv("day" to day,"problem" to problem,"praise" to praise,"note" to note),SQLiteDatabase.CONFLICT_REPLACE) }
  fun readReview(day: String): List<String> = readableDatabase.rawQuery("SELECT problem,praise,note FROM reviews WHERE day=?",arrayOf(day)).use { if(it.moveToFirst()) listOf(it.getString(0),it.getString(1),it.getString(2)) else listOf("","","") }
- fun history(): List<Pair<String,String>> {
+ fun history(requireKnownTypes:Boolean = true): List<Pair<String,String>> {
   val days=mutableListOf<String>();readableDatabase.rawQuery("SELECT day FROM contracts ORDER BY day DESC",null).use{while(it.moveToNext())days.add(it.getString(0))}
-  return days.map { date -> date to when(goalState(date)) {
+  return days.map { date -> date to when(dailyGoalState(tasks(date,includeMoved=true),contract(date).rest,date,day(),requireKnownTypes)) {
    DailyGoalState.ACHIEVED -> "完成"
    DailyGoalState.MISSED -> "未完成"
    DailyGoalState.REST -> "休息"

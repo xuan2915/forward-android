@@ -9,13 +9,13 @@ fun requiredGoalAchieved(tasks: List<Task>, restDay: Boolean = false): Boolean {
  return !restDay && tasks.all { it.typeKnown } && required.isNotEmpty() && required.all { it.done }
 }
 
-fun dailyGoalState(tasks: List<Task>, restDay: Boolean, date: String, today: String): DailyGoalState = when {
+fun dailyGoalState(tasks: List<Task>, restDay: Boolean, date: String, today: String, requireKnownTypes: Boolean = true): DailyGoalState = when {
   restDay -> DailyGoalState.REST
   date > today -> DailyGoalState.FUTURE
   tasks.isEmpty() -> DailyGoalState.UNPLANNED
-  tasks.any { !it.typeKnown } -> DailyGoalState.UNKNOWN
+  requireKnownTypes && tasks.any { !it.typeKnown } -> DailyGoalState.UNKNOWN
   tasks.none { it.required } -> DailyGoalState.NO_REQUIRED_TASKS
-  requiredGoalAchieved(tasks) -> DailyGoalState.ACHIEVED
+  tasks.filter { it.required }.all { it.done } -> DailyGoalState.ACHIEVED
   date < today -> DailyGoalState.MISSED
   else -> DailyGoalState.IN_PROGRESS
  }

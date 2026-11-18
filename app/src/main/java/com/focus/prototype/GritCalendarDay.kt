@@ -48,7 +48,7 @@ fun GritCalendarDay(
         state == "未完成" -> AppColors.Missed
         state == "无必做" -> MaterialTheme.colorScheme.surfaceContainerHigh
         state == "进行中" -> MaterialTheme.colorScheme.primary.copy(alpha = .16f)
-        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+        else -> MaterialTheme.colorScheme.surfaceContainer
     }
     Box(
         Modifier.fillMaxWidth().height(40.dp).clickable { onSelected(day.date) },
@@ -57,7 +57,7 @@ fun GritCalendarDay(
         val circle = CircleShape
         Box(
             Modifier.size(36.dp).clip(circle).background(color)
-                .then(if (day.date == selected) Modifier.border(1.dp, MaterialTheme.colorScheme.primary, circle) else if (state == "待确认") Modifier.border(1.dp, AppColors.Muted, circle) else Modifier),
+                .then(if (day.date == selected) Modifier.border(1.dp, MaterialTheme.colorScheme.primary, circle) else Modifier),
             contentAlignment = Alignment.Center,
         ) {
             Text(
