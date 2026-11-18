@@ -74,7 +74,7 @@ internal fun NightWrapUpCard(db: Database, refreshKey: Int, onChanged: () -> Uni
         Text("截止后拦截已选的抖音、B 站和游戏应用", style = MaterialTheme.typography.bodyMedium)
         Text("B 站学习窗口、紧急放行仍有效；通讯和学习工具不纳入夜间拦截", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
         Text("有明确拦截记录才抵扣后续额度，已使用奖励不追回", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-        Text("视频抵扣上限", style = MaterialTheme.typography.labelLarge)
+        Text("娱乐抵扣上限", style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf(0, 5, 10, 15, 20).forEach { cap ->
                 FilterChip(selected = config.penaltyCapMinutes == cap, onClick = { config = config.copy(penaltyCapMinutes = cap) }, label = { Text("$cap 分") })
@@ -123,7 +123,7 @@ internal fun NightWrapUpCard(db: Database, refreshKey: Int, onChanged: () -> Uni
     QuietSurface {
         Text("最近一夜", style = MaterialTheme.typography.titleMedium)
         Text(completedCycle, style = MaterialTheme.typography.labelMedium, color = AppColors.Muted)
-        Text(if (recorded.isEmpty()) "没有已记录的娱乐拦截" else "视频拦截 $videoEvents 次 · 游戏拦截 $gameEvents 次", style = MaterialTheme.typography.bodyLarge)
+        Text(if (recorded.isEmpty()) "没有已记录的娱乐拦截" else "娱乐拦截 $videoEvents 次 · 游戏拦截 $gameEvents 次", style = MaterialTheme.typography.bodyLarge)
         if (pendingMinutes > 0 || pendingGames > 0) Text("后续奖励待抵扣 $pendingMinutes 分钟 · $pendingGames 局", color = AppColors.Warning)
         Text("这只是夜间行为记录，不是睡眠时间或入睡证明", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
     }

@@ -45,10 +45,11 @@ class BlockOverlayActivity : ComponentActivity() {
         val density = resources.displayMetrics.density
         fun dp(value: Int) = (value * density).toInt()
         val blockedPackage=intent.getStringExtra(EXTRA_BLOCKED_PACKAGE).orEmpty()
+        val game = db.rewardKind(blockedPackage) == "game"
         val nightConfig=db.nightWrapUpConfig()
-        val nightRestricted=db.nightEntertainmentRestricted()&&blockedPackage in (Store.videos+Store.games)&&!db.contract().emergency&&!(blockedPackage=="tv.danmaku.bili"&&db.learningActive())
-        val exhausted = if(blockedPackage in Store.games) db.balance("game")==0L else db.balance("video")==0L&&db.tasks().any{it.required&&it.done}
-        val nextReward=db.tasks().firstOrNull{it.required&&!it.done&&(if(blockedPackage in Store.games)it.rewardGames>0 else it.rewardMinutes>0)}
+        val nightRestricted=db.nightEntertainmentRestricted()&&blockedPackage in Store(this).selected&&!db.contract().emergency&&!(blockedPackage=="tv.danmaku.bili"&&db.learningActive())
+        val exhausted = if(game) db.balance("game")==0L else db.balance("video")==0L
+        val nextReward=db.tasks().firstOrNull{it.required&&!it.done&&(if(game)it.rewardGames>0 else it.rewardMinutes>0)}
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -83,13 +84,13 @@ class BlockOverlayActivity : ComponentActivity() {
         panel.addView(label(if(nightRestricted) "现在是娱乐休息时间" else if (exhausted) "娱乐额度已用完" else "先完成一项必做任务", 29f, 0xfff1f0ed.toInt(), true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         val reason=when {
             nightRestricted -> "已选娱乐应用在 ${nightConfig.entertainmentCutoff} 至 ${nightConfig.morningRelease} 受限"
-            nextReward!=null -> "完成「${nextReward.title}」后获得 ${if(blockedPackage in Store.games)"${nextReward.rewardGames} 局游戏奖励" else "${nextReward.rewardMinutes} 分钟视频时间"}"
+            nextReward!=null -> "完成「${nextReward.title}」后获得 ${if(game)"${nextReward.rewardGames} 局游戏奖励" else "${nextReward.rewardMinutes} 分钟娱乐时长"}"
             exhausted -> "完成下一项有奖励的必做任务，获得对应额度"
             else -> "在今日任务中设置必做奖励，完成后即可使用"
         }
         panel.addView(label(reason, 16f, 0xffa1a4a7.toInt()), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(25) })
-        panel.addView(label("${db.balance("video") / 60000}", 42f, 0xfff1f0ed.toInt()), LinearLayout.LayoutParams(-1, -2))
-        panel.addView(label("剩余共享视频分钟", 13f, 0xff74787d.toInt()), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2); bottomMargin = dp(20) })
+        panel.addView(label("${if (game) db.balance("game") else db.balance("video") / 60000}", 42f, 0xfff1f0ed.toInt()), LinearLayout.LayoutParams(-1, -2))
+        panel.addView(label(if (game) "剩余游戏局数" else "剩余共享娱乐分钟", 13f, 0xff74787d.toInt()), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2); bottomMargin = dp(20) })
         button("返回自律 App", true) {
             FocusService.overlayDismissed()
             startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
@@ -114,6 +115,16 @@ class BlockOverlayActivity : ComponentActivity() {
             addView(panel, FrameLayout.LayoutParams(-1, -1))
         }
         setContentView(scroll)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        FocusService.overlayShown()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        FocusService.overlayDismissed()
     }
 
     override fun onDestroy() {

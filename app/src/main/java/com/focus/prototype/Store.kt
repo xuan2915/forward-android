@@ -25,8 +25,4 @@ class Store(context: Context) {
   val dialer = (appContext.getSystemService(Context.TELECOM_SERVICE) as TelecomManager).defaultDialerPackage
   return pkg != appContext.packageName && pkg != "com.android.settings" && pkg != home && pkg != dialer && pkg != "com.android.phone" && pkg != "com.android.systemui"
  }
- companion object {
-  val videos = setOf("com.ss.android.ugc.aweme", "tv.danmaku.bili")
-  val games = setOf("com.tencent.tmgp.sgame")
- }
 }

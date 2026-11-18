@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
   OutlinedTextField(minutes,onValueChange={minutes=it.filter(Char::isDigit).take(4)},label={Text("目标分钟")})
   listOf("行动型","成果型","掌握型").forEach { m -> TextButton(onClick={mode=m}) {Text(if(mode==m) "✓ $m" else m)} }
   OutlinedTextField(checklist,onValueChange={checklist=it},label={Text("完成标准")})
-  OutlinedTextField(video,onValueChange={video=it.filter(Char::isDigit).take(4)},label={Text(if(required) "完成后视频奖励（分钟）" else "选做视频奖励（分钟）")}); OutlinedTextField(games,onValueChange={games=it.filter(Char::isDigit).take(4)},label={Text(if(required) "完成后游戏奖励（局）" else "选做游戏奖励（局）")})
+  OutlinedTextField(video,onValueChange={video=it.filter(Char::isDigit).take(4)},label={Text(if(required) "完成后娱乐奖励（分钟）" else "选做娱乐奖励（分钟）")}); OutlinedTextField(games,onValueChange={games=it.filter(Char::isDigit).take(4)},label={Text(if(required) "完成后游戏奖励（局）" else "选做游戏奖励（局）")})
   Row { TextButton(onClick={rule="once"}){Text("一次")}; TextButton(onClick={rule="daily"}){Text("每天")}; TextButton(onClick={rule="weekly"}){Text("每周同日")} }
   Row { TextButton(onClick={rule="days:$days"}){Text("指定星期")}; TextButton(onClick={rule="interval:${intervalDays.toIntOrNull()?.coerceIn(1,365)?:3}"}){Text(if(rule.startsWith("interval:"))"✓ 自定义间隔" else "自定义间隔")} }
   if(rule.startsWith("days:"))OutlinedTextField(days,onValueChange={days=it.filter{c->c in '1'..'7'||c==','};rule="days:$days"},label={Text("星期：1 到 7，逗号分隔")})

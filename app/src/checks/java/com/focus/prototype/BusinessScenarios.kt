@@ -15,7 +15,27 @@ fun resign(root:org.json.JSONObject,payload:org.json.JSONObject):String { val bo
    test("recurrence, per-task mandatory reward, duplicate completion") {
     db.addTask(db.day(),"required",true,0,"行动型","done",20,1,"days:1,3,5")
     db.addTask(db.day(),"optional",false,0,"行动型","done",20,1,"once")
-    db.confirm(db.day(),false,30,1);check(!db.eligible());val required=db.tasks().first{it.required};db.complete(required);check(db.balance("video")==1200000L);db.complete(required);check(db.balance("video")==1200000L)
+    db.confirm(db.day(),false,30,1);check(db.eligible());val required=db.tasks().first{it.required};db.complete(required);check(db.balance("video")==1200000L);db.complete(required);check(db.balance("video")==1200000L)
+   }
+   test("one mandatory reward is usable with other mandatory work unfinished") {
+    val name = "d11-reward.db"
+    context.deleteDatabase(name)
+    Database(context, name) { now }.use { d ->
+     val today = d.day()
+     d.addTask(today, "reward", true, 0, "行动型", "", 2, 1, "once")
+     d.addTask(today, "unfinished", true, 0, "行动型", "", 0, 0, "once")
+     d.complete(d.tasks().first { it.title == "reward" })
+     check(d.tasks().any { it.required && !it.done })
+     val first = d.rewardKind("qa.calendar")
+     val second = d.rewardKind("qa.clock")
+     check(first == "video" && second == first)
+     d.consume(first, 60_000)
+     check(d.balance(second) == 60_000L)
+     d.consume(second, 90_000)
+     check(d.balance(first) == 0L && d.balance("game") == 1L)
+     d.setRewardKind("qa.calendar", "game")
+     check(d.rewardKind("qa.calendar") == "game" && d.rewardKind("qa.clock") == "video")
+    }
    }
    test("custom interval recurrence is anchored and generated once") {
     val other="interval-recurrence.db";context.deleteDatabase(other);var clock=LocalDateTime.parse("2026-11-01T12:00:00");val d=Database(context,other){clock}

@@ -178,17 +178,23 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   writableDatabase.update("contracts",cv("confirmed" to true,"rest" to rest,"base_minutes" to minutes,"base_games" to games),"day=?", arrayOf(day))
  }
  fun goalState(date:String):DailyGoalState { val c=contract(date);return dailyGoalState(tasks(date,includeMoved=true),c.rest,date,day()) }
- fun eligible(day: String = day()): Boolean { val c = contract(day); val dayTasks=tasks(day,includeMoved=true); return setting("gate_changed_$day")!="true" && c.confirmed && dayTasks.all { it.typeKnown } && (requiredGoalAchieved(dayTasks) || dayTasks.none { it.required } && c.rest) }
- fun rewardUnavailableReason(date:String):String? {
-  if(date!=day()) return "仅可领取当天任务的奖励"
-  val c=contract(date); val dayTasks=tasks(date,includeMoved=true)
-  return when {
-   setting("gate_changed_$date")=="true" -> "今日必做计划已变更，无法领取选做奖励"
-   !c.confirmed -> "请先在设置的今日计划中确认计划"
-   dayTasks.any { !it.typeKnown } -> "请先确认今日历史任务的类型"
-   !requiredGoalAchieved(dayTasks) && !(dayTasks.none { it.required } && c.rest) -> "完成今日必做任务后可领取"
-   else -> null
-  }
+ // Keep the historical ledger keys so upgrades preserve balances and debits.
+ fun rewardKind(pkg: String): String = setting(
+  "controlled_reward_$pkg",
+  if (pkg == "com.tencent.tmgp.sgame") "game" else "video"
+ ).let { if (it == "game") "game" else "video" }
+
+ fun setRewardKind(pkg: String, kind: String) {
+  require(kind == "video" || kind == "game")
+  setSetting("controlled_reward_$pkg", kind)
+ }
+
+ fun eligible(day: String = day()): Boolean = rewardUnavailableReason(day) == null
+ fun rewardUnavailableReason(date: String): String? = when {
+  date != day() -> "仅可领取当天任务的奖励"
+  setting("gate_changed_$date") == "true" -> "今日必做计划已变更，无法领取选做奖励"
+  !contract(date).confirmed -> "请先在设置的今日计划中确认计划"
+  else -> null
  }
  private fun ledger(db: SQLiteDatabase, day: String, task: String, kind: String, amount: Long) = ledgerAt(db,day,task,kind,amount,System.currentTimeMillis())
  private fun ledgerAt(db: SQLiteDatabase, day: String, task: String, kind: String, amount: Long,created:Long) { db.insertOrThrow("ledger", null, cv("id" to UUID.randomUUID().toString(),"day" to day,"task_id" to task,"kind" to kind,"amount" to amount,"created" to created)) }
@@ -285,7 +291,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   if(!config.entertainmentRestricted(observed))return false
   val cycle=config.cycleDate(observed).toString();val sql=writableDatabase;sql.beginTransaction()
   try {
-   val kind=if(packageName in Store.games) "game" else "video"
+   val kind=rewardKind(packageName)
    val values=cv("id" to eventId,"cycle_date" to cycle,"package_name" to packageName,"observed_at" to observedAt,"reserved_minutes" to 0,"reward_kind" to kind,"reserved_amount" to 0L)
    val inserted=sql.insertWithOnConflict("night_violations",null,values,SQLiteDatabase.CONFLICT_IGNORE)
    if(inserted==-1L){sql.setTransactionSuccessful();return false}
@@ -294,7 +300,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    val reserved=if(kind=="video") minOf(perEventMinutes,(cap-already).coerceAtLeast(0)) else minOf(1,(cap-already).coerceAtLeast(0))
    val reservedAmount=if(kind=="video")reserved*60_000L else reserved.toLong()
    if(reserved>0){sql.update("night_violations",cv("reserved_minutes" to if(kind=="video")reserved else 0,"reserved_amount" to reservedAmount),"id=?",arrayOf(eventId));setSetting(key,(already+reserved).toString());val pendingKey="night_pending_${kind}_$cycle";setSetting(pendingKey,((setting(pendingKey,"0").toLongOrNull()?:0L)+reservedAmount).toString())}
-   val rewardLabel=if(kind=="video")"视频分钟" else "游戏局数"
+   val rewardLabel=if(kind=="video")"娱乐分钟" else "游戏局数"
    val amountLabel=if(kind=="video")"$reserved 分钟" else "$reserved 局"
    audit(cycle,"夜间娱乐访问已拦截：$packageName"+(if(reserved>0)"；后续${rewardLabel}最多抵扣 $amountLabel" else "；已达到本夜抵扣上限"))
    sql.setTransactionSuccessful();return true

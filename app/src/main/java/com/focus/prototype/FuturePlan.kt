@@ -14,7 +14,7 @@ import java.time.LocalDate
   if(valid) { val c=db.contract(date);Text(if(c.rest) "已设为休息日" else if(c.confirmed) "计划已确认" else "计划待确认")
    db.tasks(date).forEach { task->Text("${if(task.required) "必做" else "选做"} · ${task.title}");if(!task.done)TaskChanges(task,db,onChanged) }
    OutlinedButton(onClick={onAdd(date)}){Text("添加这一天的任务")}
-   if(!c.confirmed){OutlinedTextField(minutes,onValueChange={minutes=it.filter(Char::isDigit).take(4)},label={Text("基础视频分钟")});OutlinedTextField(games,onValueChange={games=it.filter(Char::isDigit).take(4)},label={Text("基础游戏局数")})}
+   if(!c.confirmed){OutlinedTextField(minutes,onValueChange={minutes=it.filter(Char::isDigit).take(4)},label={Text("基础娱乐分钟")});OutlinedTextField(games,onValueChange={games=it.filter(Char::isDigit).take(4)},label={Text("基础游戏局数")})}
    Button(enabled=!c.confirmed,onClick={restConfirm=true}){Text("设为休息日")}
    Button(enabled=!c.confirmed && db.tasks(date).any{it.required},onClick={db.confirm(date,false,minutes.toIntOrNull()?:0,games.toIntOrNull()?:0);onChanged()}){Text("确认这一天的任务")}
   }

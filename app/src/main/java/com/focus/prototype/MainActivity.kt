@@ -157,7 +157,7 @@ class MainActivity : ComponentActivity() {
         item { Header("奖励与额度", "娱乐时间") }
         item { CardBlock {
          val video=db.rewardSnapshot("video");val games=db.rewardSnapshot("game")
-         Text(if(!protected) "应用保护未开启" else if(c.emergency) "今天已紧急解锁" else if(video.remaining>0) "保护已开启 · 额度可用" else if(tasks.any{it.required && !it.done && it.rewardMinutes>0}) "必做任务奖励逐项到账" else if(tasks.any{it.required && it.done}) "视频额度已用完" else "暂无可用视频额度",color=if(video.remaining>0 && protected && !c.emergency) AppColors.Accent else AppColors.Muted,style=MaterialTheme.typography.labelMedium)
+         Text(if(!protected) "应用保护未开启" else if(c.emergency) "今天已紧急解锁" else if(video.remaining>0) "保护已开启 · 额度可用" else if(tasks.any{it.required && !it.done && it.rewardMinutes>0}) "必做任务奖励逐项到账" else if(tasks.any{it.required && it.done}) "娱乐时长已用完" else "暂无可用娱乐时长",color=if(video.remaining>0 && protected && !c.emergency) AppColors.Accent else AppColors.Muted,style=MaterialTheme.typography.labelMedium)
          Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
           Column(verticalArrangement=Arrangement.spacedBy(2.dp)) { Text("${video.remaining / 60000}",fontSize=38.sp,fontWeight=FontWeight.Light,lineHeight=42.sp,color=AppColors.Reward); Text("剩余分钟",color=AppColors.Muted,style=MaterialTheme.typography.bodySmall) }
           Column(horizontalAlignment=Alignment.End,verticalArrangement=Arrangement.spacedBy(2.dp)) { Text("${games.remaining}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Light); Text("剩余游戏局数",color=AppColors.Muted,style=MaterialTheme.typography.bodySmall) }
@@ -166,16 +166,16 @@ class MainActivity : ComponentActivity() {
          Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {Text("已获得 ${video.earned/60000} 分钟",style=MaterialTheme.typography.labelMedium,color=AppColors.Muted);Text("已使用 ${video.used/60000} 分钟",style=MaterialTheme.typography.labelMedium,color=AppColors.Muted)}
          if(video.sleepDeducted>0 || video.expired>0 || video.reversed>0 || db.pendingSleepPenalty()>0) Text("睡眠扣减 ${video.sleepDeducted/60000} · 已过期 ${video.expired/60000} · 冲回 ${video.reversed/60000} · 待抵扣 ${db.pendingSleepPenalty()/60000} 分钟",style=MaterialTheme.typography.labelSmall,color=AppColors.Muted)
          val nightPendingVideo=db.pendingNightPenalty("video");val nightPendingGames=db.pendingNightPenalty("game")
-         if(video.nightDeducted>0 || games.nightDeducted>0 || nightPendingVideo>0 || nightPendingGames>0) Text("夜间抵扣 · 视频 ${video.nightDeducted/60000} 分钟、游戏 ${games.nightDeducted} 局 · 待抵扣 ${nightPendingVideo/60000} 分钟、$nightPendingGames 局",style=MaterialTheme.typography.labelSmall,color=AppColors.Muted)
+         if(video.nightDeducted>0 || games.nightDeducted>0 || nightPendingVideo>0 || nightPendingGames>0) Text("夜间抵扣 · 娱乐 ${video.nightDeducted/60000} 分钟、游戏 ${games.nightDeducted} 局 · 待抵扣 ${nightPendingVideo/60000} 分钟、$nightPendingGames 局",style=MaterialTheme.typography.labelSmall,color=AppColors.Muted)
          Text("游戏已获 ${games.earned} 局 · 已用 ${games.used} 局 · 每日 00:00 更新，额度 ${db.setting("boundary","4").padStart(2,'0')}:00 结算",style=MaterialTheme.typography.labelSmall,color=AppColors.Quiet)
          if(games.remaining > 0) TextButton(onClick={db.consume("game",1); refresh++}) { Text("手动记录已使用一局") }
         } }
-        items(tasks.filter{it.typeKnown && !it.required && it.done && !it.claimed},key={it.id}) { task -> CardBlock { Text("${task.title} · 领取一项奖励"); Row { if(task.rewardMinutes>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"video");refresh++}) {Text("${task.rewardMinutes} 分钟视频")}; if(task.rewardGames>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"game");refresh++}) {Text("${task.rewardGames} 局游戏") } }; db.rewardUnavailableReason(task.date)?.let { Text(it,color=AppColors.Muted) } } }
+        items(tasks.filter{it.typeKnown && !it.required && it.done && !it.claimed},key={it.id}) { task -> CardBlock { Text("${task.title} · 领取一项奖励"); Row { if(task.rewardMinutes>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"video");refresh++}) {Text("${task.rewardMinutes} 分钟娱乐时长")}; if(task.rewardGames>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"game");refresh++}) {Text("${task.rewardGames} 局游戏") } }; db.rewardUnavailableReason(task.date)?.let { Text(it,color=AppColors.Muted) } } }
         item { TextButton(onClick={rewardControlsExpanded=!rewardControlsExpanded},modifier=Modifier.animateContentSize()) {Text(if(rewardControlsExpanded) "收起其他操作" else "应用保护与其他操作") } }
         if(rewardControlsExpanded) item { CardBlock {
          if(!c.emergency) EmergencyUnlock(db){refresh++} else TextButton(onClick={db.resumeProtection();refresh++}){Text("恢复应用保护")}
          TextButton(onClick={db.startLearning();refresh++},enabled=!db.learningActive()) {Text(if(db.learningActive()) "B站学习窗口进行中" else "开启 B站15分钟学习窗口")}
-         Text("学习窗口临时放行 · 不扣视频额度",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
+         Text("学习窗口临时放行 · 不扣娱乐时长",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
          TextButton(onClick={page=5;settingsSection="protection"}){Text("受限应用与权限")}
          TextButton(onClick={page=5;settingsSection="sleep"}){Text("夜间收尾设置")}
         } }
@@ -200,7 +200,24 @@ class MainActivity : ComponentActivity() {
           "protection" -> {
            item { CardBlock { Text(if(protected) "应用保护已开启" else "应用保护未开启",style=MaterialTheme.typography.titleMedium,color=if(protected) AppColors.Accent else AppColors.Text);Text("已选择 ${store.selected.size} 个受限应用",color=AppColors.Muted);SecondaryAction("打开无障碍设置",{startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))});Text("服务连接状态会在返回后更新",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted) } }
            item { Text("受限应用",style=MaterialTheme.typography.titleMedium) }
-           items(apps,key={it.activityInfo.packageName}) {app->val pkg=app.activityInfo.packageName;Row(Modifier.fillMaxWidth().heightIn(min=52.dp).toggleable(value=pkg in store.selected,onValueChange={checked->store.selected=if(checked)store.selected+pkg else store.selected-pkg;refresh++}).padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically){Text(app.loadLabel(packageManager).toString(),modifier=Modifier.weight(1f));Checkbox(pkg in store.selected,onCheckedChange=null)} }
+           items(apps, key = { it.activityInfo.packageName }) { app ->
+            val pkg = app.activityInfo.packageName
+            val selected = pkg in store.selected
+            Column {
+             Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).toggleable(value = selected, onValueChange = { checked ->
+              if (checked && db.setting("controlled_reward_$pkg").isEmpty()) db.setRewardKind(pkg, "video")
+              store.selected = if (checked) store.selected + pkg else store.selected - pkg
+              refresh++
+             }).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+              Text(app.loadLabel(packageManager).toString(), modifier = Modifier.weight(1f))
+              Checkbox(selected, onCheckedChange = null)
+             }
+             if (selected) Row(Modifier.padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              FilterChip(selected = db.rewardKind(pkg) == "video", onClick = { db.setRewardKind(pkg, "video"); refresh++ }, label = { Text("娱乐时长") })
+              FilterChip(selected = db.rewardKind(pkg) == "game", onClick = { db.setRewardKind(pkg, "game"); refresh++ }, label = { Text("游戏局数") })
+             }
+            }
+           }
           }
           "reward" -> item { DaySettings(db){refresh++} }
           "sleep" -> item { NightWrapUpCard(db,refresh){refresh++} }
@@ -298,11 +315,11 @@ internal fun focusDuration(milliseconds:Long):String = when {
     Row(verticalAlignment=Alignment.CenterVertically) { FilterChip(selected=recurrence.startsWith("interval:"),onClick={recurrence="interval:${intervalDays.toIntOrNull()?.coerceIn(1,365)?:3}"},label={Text("自定义间隔")});if(recurrence.startsWith("interval:")){Spacer(Modifier.width(8.dp));NumberField("间隔天数",intervalDays){intervalDays=it;recurrence="interval:${it.toIntOrNull()?.coerceIn(1,365)?:1}"}} }
    }
   }
-  TextButton(onClick={rewardsExpanded=!rewardsExpanded},modifier=Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).immediatePress()) { Text("奖励设置 · 视频 $video 分钟，游戏 $games 局${if(rewardsExpanded)"  −" else "  +"}") }
+  TextButton(onClick={rewardsExpanded=!rewardsExpanded},modifier=Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).immediatePress()) { Text("奖励设置 · 娱乐 $video 分钟，游戏 $games 局${if(rewardsExpanded)"  −" else "  +"}") }
   AnimatedVisibility(rewardsExpanded) {
    Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
     Text(if(required)"必做任务完成后发放" else "选做任务完成后可选领取",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
-    NumberField("视频分钟",video){video=it}
+    NumberField("娱乐分钟",video){video=it}
     NumberField("游戏局数",games){games=it}
    }
   }
