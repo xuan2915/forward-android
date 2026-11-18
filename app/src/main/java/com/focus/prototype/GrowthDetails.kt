@@ -68,6 +68,7 @@ fun GrowthDetails(db: Database, refreshKey: Int = 0, onAllAchievements: () -> Un
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         GritAnalyticsHeader("过去一年", icon = R.drawable.grit_heat)
         GritWeeklyHeatMap(today, history) { selectedDate = it; section = GrowthSection.CALENDAR }
+        Text("带描边的日期：历史任务类型待确认", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             CalendarLegend(AppColors.Accent, "完成")
             CalendarLegend(AppColors.Border, "休息")

@@ -18,6 +18,7 @@
 package com.focus.prototype
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -94,6 +95,7 @@ fun GritWeeklyHeatMap(today: LocalDate, history: Map<String, String>, onDateSele
                                 Modifier.size(28.dp)
                                     .clip(CircleShape)
                                     .background(color)
+                                    .then(if (status == "待确认") Modifier.border(1.dp, AppColors.Muted, CircleShape) else Modifier)
                                     .clickable(enabled = status != null && date <= today) { onDateSelected(date) },
                                 contentAlignment = Alignment.Center,
                             ) {
