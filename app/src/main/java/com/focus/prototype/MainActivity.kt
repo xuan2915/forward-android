@@ -36,10 +36,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -76,7 +76,8 @@ class MainActivity : ComponentActivity() {
     // Keep navigation alive while this Activity is backgrounded; a fresh Activity follows its launch intent.
     var page by remember { mutableIntStateOf(initialNavigation.page) }; var planManagement by remember { mutableStateOf(initialNavigation.openPlanManagement) }; var planSection by remember { mutableStateOf<String?>(if(initialNavigation.openPlanManagement) "import" else null) }; var settingsSection by remember { mutableStateOf<String?>(null) }; var editor by remember { mutableStateOf(false) };var showAllRewardHistory by remember { mutableStateOf(false) };var rewardControlsExpanded by remember { mutableStateOf(false) };var selectedRewardRecord by remember { mutableStateOf<String?>(null) };var taskFilter by remember { mutableIntStateOf(0) }
     var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }; var editingTaskId by remember { mutableStateOf<String?>(null) };var movingTask by remember { mutableStateOf<Task?>(null) };var deletingTask by remember { mutableStateOf<Task?>(null) };var allAchievements by remember { mutableStateOf(false) }; var newAchievement by remember { mutableStateOf(nextUnseenAchievement(db)) }; var gritAnalyticsTaskId by remember { mutableStateOf<String?>(null) }; var dailyCardDate by remember { mutableStateOf<String?>(null) }; var dailyCardOpenDate by remember { mutableStateOf<String?>(null) }
-    fun dismissTaskActions() { movingTask=null; deletingTask=null }
+    var detailMode by remember { mutableStateOf(if (BuildConfig.DEBUG) db.setting(DetailModeKey,"sheet") else "sheet") }; var inlineTaskId by remember { mutableStateOf<String?>(null) }
+    fun dismissTaskActions() { movingTask=null; deletingTask=null; inlineTaskId=null }
    LaunchedEffect(shareVersion) { if(shareVersion>0) { page=0;planManagement=true;planSection="import";settingsSection=null;editor=false } }
    LaunchedEffect(Unit) { withContext(Dispatchers.IO) { IndependentBackup.saveIfDue(this@MainActivity, db) } }
    LaunchedEffect(Unit) { while(true) { db.settleToday();focusTimer.advance();if(now%10L==0L)db.checkpoint();now++; delay(1000) } }
@@ -90,8 +91,9 @@ class MainActivity : ComponentActivity() {
    val protected = remember(tick) { val id = ComponentName(this,FocusService::class.java).flattenToString(); FocusService.connected && Settings.Secure.getString(contentResolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)?.split(':')?.any { it.equals(id,true) } == true }
    LaunchedEffect(refresh) { if (newAchievement == null) newAchievement = nextUnseenAchievement(db) }
    FocusTheme { MotionHost(db.xp(),showToast=page!=2 && dailyCardOpenDate==null && dailyCardDate==null && (taskDetailsId!=null || newAchievement==null)) {
-       androidx.activity.compose.BackHandler(enabled=allAchievements || gritAnalyticsTaskId!=null || settingsSection!=null || planManagement || page==5 || editor || dailyCardOpenDate!=null || dailyCardDate!=null) {
-        when { dailyCardOpenDate!=null -> {DailyCards.markRevealSeen(db,dailyCardOpenDate!!);dailyCardOpenDate=null;refresh++}; dailyCardDate!=null -> dailyCardDate=null; allAchievements -> allAchievements=false; gritAnalyticsTaskId!=null -> gritAnalyticsTaskId=null; editor -> editor=false; settingsSection!=null -> settingsSection=null; planManagement && planSection!=null -> planSection=null; planManagement -> planManagement=false; page==5 -> page=0; else -> page=0 }
+       val inlineDetailOpen = page == 0 && !editor && !planManagement && inlineTaskId != null
+       androidx.activity.compose.BackHandler(enabled=inlineDetailOpen || allAchievements || gritAnalyticsTaskId!=null || settingsSection!=null || planManagement || page==5 || editor || dailyCardOpenDate!=null || dailyCardDate!=null) {
+        when { dailyCardOpenDate!=null -> {DailyCards.markRevealSeen(db,dailyCardOpenDate!!);dailyCardOpenDate=null;refresh++}; dailyCardDate!=null -> dailyCardDate=null; allAchievements -> allAchievements=false; gritAnalyticsTaskId!=null -> gritAnalyticsTaskId=null; editor -> editor=false; settingsSection!=null -> settingsSection=null; planManagement && planSection!=null -> planSection=null; planManagement -> planManagement=false; page==5 -> page=0; inlineDetailOpen -> inlineTaskId=null; else -> page=0 }
        }
      Scaffold(containerColor=AppColors.Background, bottomBar = { if(taskDetailsId==null && gritAnalyticsTaskId==null && !allAchievements && page!=5 && !planManagement) AppNavigation(page){page=it;editor=false;planManagement=false;settingsSection=null;gritAnalyticsTaskId=null;allAchievements=false;dismissTaskActions()} }) { pad ->
      Box(Modifier.fillMaxSize()) {
@@ -104,11 +106,22 @@ class MainActivity : ComponentActivity() {
         confirmed=c.confirmed,
         onFilter={taskFilter=it}, onAdd={dismissTaskActions();targetDay=today;editor=true},
         onPlan={dismissTaskActions();planManagement=true}, onSettings={dismissTaskActions();settingsSection=null;page=5},
-        onDetails={taskDetailsId=it.id},
-        onEdit={editingTaskId=it.id;taskDetailsId=it.id},
+        onDetails={ if(detailMode=="inline") inlineTaskId=if(inlineTaskId==it.id) null else it.id else taskDetailsId=it.id },
+        onEdit={inlineTaskId=null;editingTaskId=it.id;taskDetailsId=it.id},
         onMove={task->movingTask=task},
         onDelete={task->deletingTask=task},
         onEditDailyCard={date->DailyCards.markRevealSeen(db,date);dailyCardDate=date;refresh++},
+        detailMode=detailMode.takeIf{BuildConfig.DEBUG},
+        onDetailMode={mode->db.setSetting(DetailModeKey,mode);detailMode=mode;inlineTaskId=null},
+        expandedTaskId=inlineTaskId.takeIf{detailMode=="inline"},
+        inlineDetail={ rowTask ->
+         val live = remember(rowTask.id,tick) { db.task(rowTask.id) } ?: rowTask
+         TaskDetailBody(live,db,focusTimer,startEditing=false,showHeader=false,
+          onClose={after->inlineTaskId=null;after()},
+          onFocus={page=4},
+          onAnalytics={gritAnalyticsTaskId=live.id;page=2},
+          onChanged={refresh++})
+        },
        )
       } else if (!editor && screen == 2 && allAchievements) {
        AchievementsPage(db,refresh){allAchievements=false}

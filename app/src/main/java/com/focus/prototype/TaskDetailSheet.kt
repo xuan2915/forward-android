@@ -1,44 +1,50 @@
 package com.focus.prototype
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.Button
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -46,14 +52,35 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
+/** Detail presentation chosen in the debug comparison toggle: "sheet" = plan A, "inline" = plan B. */
+internal const val DetailModeKey = "ui_task_detail_mode"
+internal fun Database.inlineTaskDetail(): Boolean = setting(DetailModeKey, "sheet") == "inline"
+
+/**
+ * Plan A: a follow-the-finger bottom sheet.
+ *
+ * One value, offsetPx, is the single source of truth for the sheet's vertical
+ * position. Entering, dragging, flinging, springing back and closing all write
+ * to it; the scrim and the handle derive from it. Any motion can therefore be
+ * caught mid-flight by the finger and continued from where it is.
+ */
 @Composable
 fun TaskDetailSheet(
     task: Task,
@@ -66,18 +93,155 @@ fun TaskDetailSheet(
     onChanged: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
-    var visible by remember(task.id) { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val reduced = LocalReducedMotion.current
     val scope = rememberCoroutineScope()
-    LaunchedEffect(task.id) { visible = true }
-    fun dismiss(after: () -> Unit = onDismiss) {
-        if (!visible) return
-        visible = false
-        scope.launch {
-            delay(AppMotion.Standard.toLong())
+    var sheetHeight by remember(task.id) { mutableFloatStateOf(0f) }
+    var offsetPx by remember(task.id) { mutableFloatStateOf(Float.NaN) }
+    var closing by remember(task.id) { mutableStateOf(false) }
+    var dragging by remember(task.id) { mutableStateOf(false) }
+    var motion by remember(task.id) { mutableStateOf<Job?>(null) }
+    val velocityThreshold = with(density) { 1100.dp.toPx() }
+    val maxThreshold = with(density) { 200.dp.toPx() }
+    val closeThreshold = if (sheetHeight > 0f) minOf(sheetHeight * .3f, maxThreshold) else maxThreshold
+
+    fun animateTo(target: Float, velocity: Float, settle: Boolean, after: () -> Unit = {}) {
+        motion?.cancel()
+        motion = scope.launch {
+            val start = if (offsetPx.isNaN()) sheetHeight else offsetPx
+            if (reduced) offsetPx = target else animate(
+                start, target, velocity,
+                // Settling keeps a hint of overshoot so a released sheet lands
+                // with weight; closing is critically damped so it never bounces back.
+                if (settle) spring(dampingRatio = .8f, stiffness = 380f)
+                else spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow),
+            ) { value, _ -> offsetPx = value }
             after()
         }
     }
-    BackHandler(enabled = true) { dismiss() }
+    fun close(velocity: Float = 0f, after: () -> Unit = onDismiss) {
+        if (closing) return
+        closing = true
+        animateTo(sheetHeight.coerceAtLeast(1f), velocity.coerceAtLeast(0f), settle = false, after = after)
+    }
+    fun settle(velocity: Float) {
+        dragging = false
+        if (closing || offsetPx.isNaN()) return
+        val shouldClose = velocity > velocityThreshold || (offsetPx > closeThreshold && velocity > -velocityThreshold / 2)
+        if (shouldClose) close(velocity) else animateTo(0f, velocity, settle = true)
+    }
+    fun dragBy(delta: Float): Float {
+        if (closing || offsetPx.isNaN()) return 0f
+        if (!dragging) { motion?.cancel(); dragging = true }
+        val previous = offsetPx
+        // Above the resting position the sheet resists (rubber band) instead of stopping dead.
+        val next = offsetPx + if (offsetPx <= 0f && delta < 0f) delta * .18f else delta
+        offsetPx = next.coerceIn(-with(density) { 24.dp.toPx() }, sheetHeight)
+        return offsetPx - previous
+    }
+
+    // Enter from exactly the measured sheet height, so the first frame already
+    // sits on the same track that dragging and closing use.
+    LaunchedEffect(task.id, sheetHeight > 0f) {
+        if (sheetHeight > 0f && offsetPx.isNaN()) {
+            offsetPx = sheetHeight
+            animateTo(0f, 0f, settle = true)
+        }
+    }
+    BackHandler(enabled = true) { close() }
+
+    val connection = remember(task.id) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset =
+                // Finger moving up while the sheet is lowered: raise the sheet before scrolling content.
+                if (available.y < 0f && offsetPx > 0f && source == NestedScrollSource.UserInput) Offset(0f, dragBy(available.y)) else Offset.Zero
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
+                // Content already at its top and the finger keeps pulling: the sheet follows the finger.
+                if (available.y > 0f && source == NestedScrollSource.UserInput) Offset(0f, dragBy(available.y)) else Offset.Zero
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (dragging || offsetPx > .5f || offsetPx < -.5f) { settle(available.y); return available }
+                return Velocity.Zero
+            }
+        }
+    }
+
+    val height = sheetHeight.coerceAtLeast(1f)
+    val progress = if (offsetPx.isNaN()) 0f else (1f - offsetPx / height).coerceIn(0f, 1f)
+    val pull = if (offsetPx.isNaN()) 0f else (offsetPx / closeThreshold).coerceIn(0f, 1f)
+    val armed = dragging && pull >= 1f
+    LaunchedEffect(armed) { if (armed) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val fallbackOffset = with(density) { maxHeight.toPx() }
+        Box(
+            Modifier.fillMaxSize()
+                .graphicsLayer { alpha = progress }
+                .background(Color.Black.copy(alpha = 0.56f))
+                .clickable(remember { MutableInteractionSource() }, indication = null) { close() },
+        )
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .heightIn(max = maxHeight * .91f)
+                .onSizeChanged { sheetHeight = it.height.toFloat() }
+                .graphicsLayer {
+                    translationY = if (offsetPx.isNaN()) fallbackOffset else offsetPx
+                    // Depth: the sheet sinks very slightly as it is pulled away.
+                    val s = 1f - .035f * pull
+                    scaleX = s
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(.5f, 0f)
+                }
+                .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp))
+                .nestedScroll(connection)
+                .navigationBarsPadding().imePadding(),
+        ) {
+            // Grabbable header: dragging here always moves the sheet, independent of scroll.
+            Box(
+                Modifier.fillMaxWidth()
+                    .draggable(
+                        rememberDraggableState { dragBy(it) },
+                        Orientation.Vertical,
+                        onDragStopped = { settle(it) },
+                    )
+                    .padding(top = 12.dp, bottom = 8.dp).height(16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                // The handle reports how close the pull is to closing: it widens
+                // with the pull and turns accent once release would close.
+                Surface(
+                    Modifier.width((36 + 20 * pull).dp).height(4.dp), shape = RoundedCornerShape(50),
+                    color = if (armed) AppColors.Accent else lerp(AppColors.Muted, AppColors.Accent, pull * .4f),
+                ) {}
+            }
+            Column(
+                Modifier.fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = AppSpace.Page).padding(bottom = AppSpace.Large)
+                    .animateContentSize(motionSizeSpec()),
+                verticalArrangement = Arrangement.spacedBy(AppSpace.Medium),
+            ) {
+                TaskDetailBody(task, db, timer, startEditing, showHeader = true, onClose = { after -> close(after = after) }, onFocus = onFocus, onAnalytics = onAnalytics, onChanged = onChanged)
+            }
+        }
+    }
+}
+
+/**
+ * Detail content shared by plan A (sheet) and plan B (inline row expansion).
+ * onClose closes the current presentation and then runs the given action.
+ */
+@Composable
+fun ColumnScope.TaskDetailBody(
+    task: Task,
+    db: Database,
+    timer: FocusTimer,
+    startEditing: Boolean,
+    showHeader: Boolean,
+    onClose: (after: () -> Unit) -> Unit,
+    onFocus: () -> Unit,
+    onAnalytics: () -> Unit,
+    onChanged: () -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
     var checking by remember(task.id) { mutableStateOf(false) }
     var selfCheck by remember(task.id) { mutableStateOf(false) }
     var revoking by remember(task.id) { mutableStateOf(false) }
@@ -88,34 +252,7 @@ fun TaskDetailSheet(
     val completionMode = if (task.mode == "timer") "计时" else task.mode
     val canComplete = selfCheck && elapsed >= task.minutes * 60_000L && (task.mode == "行动型" || task.evidence.isNotBlank())
 
-    AnimatedVisibility(
-        visible = visible,
-        modifier = Modifier.fillMaxSize(),
-        enter = fadeIn(tween(AppMotion.Short)),
-        exit = fadeOut(tween(AppMotion.Short)),
-    ) {
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.56f)).clickable { dismiss() })
-            AnimatedVisibility(
-                visible = visible,
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
-                enter = slideInVertically(spring(dampingRatio = AppMotion.Damping, stiffness = AppMotion.Stiffness)) { it } + fadeIn(tween(AppMotion.Standard)),
-                exit = slideOutVertically(tween(AppMotion.Standard)) { it } + fadeOut(tween(AppMotion.Short)),
-            ) {
-                Column(
-                    Modifier.fillMaxWidth()
-                        .heightIn(max = maxHeight * .91f)
-                        .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp))
-                        .navigationBarsPadding().imePadding()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = AppSpace.Page).padding(bottom = AppSpace.Large)
-                        .animateContentSize(motionSizeSpec()),
-                    verticalArrangement = Arrangement.spacedBy(AppSpace.Medium),
-                ) {
-                    Box(Modifier.fillMaxWidth().padding(top = 12.dp).height(16.dp), contentAlignment = Alignment.Center) {
-                        Surface(Modifier.width(36.dp).height(4.dp), shape = RoundedCornerShape(50), color = AppColors.Muted) {}
-                    }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            if (showHeader) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(if (!task.typeKnown) "任务类型待确认" else if (task.required) "必做任务" else "选做任务", style = MaterialTheme.typography.labelLarge, color = AppColors.Muted)
                     Text(task.title, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold))
@@ -154,7 +291,7 @@ fun TaskDetailSheet(
                     Text("完成方式", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
                 }
             }
-            TextButton(onClick = { dismiss(onAnalytics) }, modifier = Modifier.align(Alignment.End)) {
+            TextButton(onClick = { onClose(onAnalytics) }, modifier = Modifier.align(Alignment.End)) {
                 Text("查看成长统计")
             }
             if (task.checklist.isNotBlank()) {
@@ -198,7 +335,7 @@ fun TaskDetailSheet(
                             else -> { if (timer.phase != "ready") timer.finish(); timer.begin(task) }
                         }
                         onChanged()
-                        if (!active) dismiss(onFocus)
+                        if (!active) onClose(onFocus)
                     },
                     Modifier.fillMaxWidth(),
                     icon = { PlayPauseMorph(if (active) 1f else 0f) },
@@ -245,10 +382,6 @@ fun TaskDetailSheet(
                 Text("计划调整", style = MaterialTheme.typography.titleMedium)
                 TaskChanges(task, db, onChanged, startEditing)
             }
-        }
-    }
-    }
-    }
 
     if (resetting) AlertDialog(
         onDismissRequest = { resetting = false },

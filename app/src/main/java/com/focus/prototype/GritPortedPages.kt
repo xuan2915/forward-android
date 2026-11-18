@@ -14,6 +14,17 @@
 package com.focus.prototype
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
@@ -127,7 +138,24 @@ internal fun GritTaskListPage(
     onMove: (Task) -> Unit,
     onDelete: (Task) -> Unit,
     onEditDailyCard: (String) -> Unit,
+    detailMode: String? = null,
+    onDetailMode: (String) -> Unit = {},
+    expandedTaskId: String? = null,
+    inlineDetail: (@Composable ColumnScope.(Task) -> Unit)? = null,
 ) {
+    val listState = rememberLazyListState()
+    val density = LocalDensity.current
+    // Plan B: when a row opens low on screen, carry it toward the upper part of
+    // the list while it grows, so the detail opens into view rather than below
+    // the fold. The row travels with the expansion instead of jumping.
+    LaunchedEffect(expandedTaskId) {
+        val id = expandedTaskId ?: return@LaunchedEffect
+        val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id } ?: return@LaunchedEffect
+        val anchor = with(density) { 8.dp.toPx() }
+        if (info.offset > listState.layoutInfo.viewportSize.height * .3f || info.offset < 0) {
+            listState.animateScrollBy(info.offset - anchor, spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow))
+        }
+    }
     val completed = tasks.count(Task::done)
     val filteredTasks = when (filter) {
         1 -> tasks.filter(Task::required)
@@ -160,6 +188,7 @@ internal fun GritTaskListPage(
                     style = MaterialTheme.typography.titleMedium.copy(fontSize = 22.sp, fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (detailMode != null) DetailModeToggle(detailMode, onDetailMode)
                 TextButton(onClick = onPlan) { Text("计划管理") }
             }
         }
@@ -176,6 +205,7 @@ internal fun GritTaskListPage(
 
         Box(Modifier.fillMaxSize()) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp).clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)),
                 contentPadding = PaddingValues(top = 16.dp, bottom = 88.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -190,7 +220,7 @@ internal fun GritTaskListPage(
                         )
                     }
                     itemsIndexed(continuing, key = { _, task -> "continue-${task.id}" }) { index, task ->
-                        GritTaskListCard(task, gritTaskShape(index, continuing.size), onDetails, onEdit, onMove, onDelete)
+                        GritTaskListCard(task, index, continuing.size, onDetails, onEdit, onMove, onDelete)
                     }
                 }
                 if (filteredTasks.isEmpty()) {
@@ -204,7 +234,15 @@ internal fun GritTaskListPage(
                     }
                 } else {
                     itemsIndexed(filteredTasks, key = { _, task -> task.id }) { index, task ->
-                        GritTaskListCard(task, gritTaskShape(index, filteredTasks.size), onDetails, onEdit, onMove, onDelete)
+                        GritTaskListCard(
+                            task, index, filteredTasks.size, onDetails, onEdit, onMove, onDelete,
+                            modifier = Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null),
+                            expanded = expandedTaskId == task.id,
+                            dimmed = expandedTaskId != null && expandedTaskId != task.id,
+                            joinedAbove = filteredTasks.getOrNull(index - 1)?.id.let { it == null || it != expandedTaskId },
+                            joinedBelow = filteredTasks.getOrNull(index + 1)?.id.let { it == null || it != expandedTaskId },
+                            detail = inlineDetail,
+                        )
                     }
                 }
                 if (dailyCardQualifies(tasks)) {
@@ -218,6 +256,25 @@ internal fun GritTaskListPage(
             ) {
                 Icon(painterResource(R.drawable.grit_add), contentDescription = "添加任务")
             }
+        }
+    }
+}
+
+@Composable
+private fun DetailModeToggle(mode: String, onMode: (String) -> Unit) {
+    // Debug-only comparison switch between plan A (sheet) and plan B (inline).
+    Row(
+        Modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        listOf("sheet" to "详情 A", "inline" to "详情 B").forEach { (value, label) ->
+            val selected = mode == value
+            Surface(
+                onClick = { onMode(value) },
+                shape = RoundedCornerShape(50),
+                color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            ) { Text(label, Modifier.padding(horizontal = 10.dp, vertical = 6.dp), style = MaterialTheme.typography.labelMedium) }
         }
     }
 }
@@ -239,12 +296,32 @@ private fun GritFilterButton(selected: Boolean, text: String, onClick: () -> Uni
 @Composable
 private fun GritTaskListCard(
     task: Task,
-    shape: Shape,
+    index: Int,
+    count: Int,
     onDetails: (Task) -> Unit,
     onEdit: (Task) -> Unit,
     onMove: (Task) -> Unit,
     onDelete: (Task) -> Unit,
+    modifier: Modifier = Modifier,
+    expanded: Boolean = false,
+    dimmed: Boolean = false,
+    joinedAbove: Boolean = true,
+    joinedBelow: Boolean = true,
+    detail: (@Composable ColumnScope.(Task) -> Unit)? = null,
 ) {
+    // Plan B: the open row lifts out of its group. Its corners and its
+    // neighbours' facing corners round off, a gap opens around it and the rest
+    // of the list steps back, all on the same spring so nothing moves alone.
+    val reduced = LocalReducedMotion.current
+    val liftSpec = if (reduced) tween<Float>(0) else spring<Float>(dampingRatio = .9f, stiffness = Spring.StiffnessMediumLow)
+    val lift by animateFloatAsState(if (expanded) 1f else 0f, liftSpec, label = "grit-row-lift")
+    val dim by animateFloatAsState(if (dimmed) 1f else 0f, tween(motionMillis()), label = "grit-row-dim")
+    val topEdge by animateFloatAsState(if (index == 0 || expanded || !joinedAbove) 1f else 0f, liftSpec, label = "grit-row-top")
+    val bottomEdge by animateFloatAsState(if (index == count - 1 || expanded || !joinedBelow) 1f else 0f, liftSpec, label = "grit-row-bottom")
+    val shape = if (count <= 1) detachedItemShape(26) else RoundedCornerShape(
+        topStart = (4 + 22 * topEdge).dp, topEnd = (4 + 22 * topEdge).dp,
+        bottomStart = (4 + 22 * bottomEdge).dp, bottomEnd = (4 + 22 * bottomEdge).dp,
+    )
     var menuExpanded by remember(task.id) { mutableStateOf(false) }
     var wasDone by remember(task.id) { mutableStateOf(task.done) }
     val strikeProgress = remember(task.id) { Animatable(if (task.done) 1f else 0f) }
@@ -279,9 +356,13 @@ private fun GritTaskListCard(
         label = "grit-task-metadata-color",
     )
     Card(
-        modifier = Modifier.animateContentSize(motionSizeSpec()),
+        modifier = modifier
+            .padding(vertical = (10 * lift).dp)
+            .graphicsLayer { alpha = 1f - .42f * dim }
+            .then(if (detail == null) Modifier.animateContentSize(motionSizeSpec()) else Modifier),
         colors = CardDefaults.cardColors(containerColor = cardBackground, contentColor = cardContent),
         shape = shape,
+        elevation = CardDefaults.cardElevation(defaultElevation = (6 * lift).dp),
     ) {
         // Grit TaskCard row adapted to dated self-discipline tasks. Completion
         // remains a detail-sheet action so evidence and frozen-plan rules stay
@@ -365,6 +446,25 @@ private fun GritTaskListCard(
                     DropdownMenuItem(text = { Text("查看详情") }, onClick = { menuExpanded = false; onDetails(task) })
                     if (!task.done) DropdownMenuItem(text = { Text("删除任务") }, onClick = { menuExpanded = false; onDelete(task) })
                 }
+            }
+        }
+        if (detail != null) AnimatedVisibility(
+            visible = expanded,
+            // The detail grows out of the row's lower edge; content drifts down
+            // a little behind the opening edge so it reads as unfolding, not popping.
+            enter = expandVertically(spring(dampingRatio = .9f, stiffness = Spring.StiffnessMediumLow), expandFrom = Alignment.Top) +
+                fadeIn(tween(motionMillis(AppMotion.Standard), delayMillis = motionMillis(60))) +
+                slideInVertically(spring(dampingRatio = .9f, stiffness = Spring.StiffnessMediumLow)) { -it / 12 },
+            exit = shrinkVertically(spring(dampingRatio = 1f, stiffness = Spring.StiffnessMedium), shrinkTowards = Alignment.Top) +
+                fadeOut(tween(motionMillis(AppMotion.Short))),
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp).animateContentSize(motionSizeSpec()),
+                verticalArrangement = Arrangement.spacedBy(AppSpace.Medium),
+            ) {
+                androidx.compose.material3.HorizontalDivider(color = AppColors.Border.copy(alpha = .6f))
+                detail(task)
+                TextButton(onClick = { onDetails(task) }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("收起详情") }
             }
         }
     }
