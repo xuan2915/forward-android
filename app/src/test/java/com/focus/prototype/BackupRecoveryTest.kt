@@ -71,6 +71,25 @@ class BackupRecoveryTest {
         } finally { migrated.close() }
     }
 
+    @Test fun rejectedInsertRollsBackReplacement() {
+        db("rollback-source.db").use { source ->
+            source.addTask("2026-11-17", "Incoming", false, 0, "行动型", "", 0, 0, "once")
+            val snapshot = Backup.export(context, source)
+            db("rollback-target.db").use { target ->
+                target.addTask("2026-11-17", "Keep me", false, 0, "行动型", "", 0, 0, "once")
+                target.setSetting("rollback_marker", "original")
+                val existing = target.tasks().single()
+                target.writableDatabase.execSQL(
+                    "CREATE TRIGGER reject_restore BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT, 'test rollback'); END"
+                )
+                val failure = runCatching { Backup.restore(context, target, snapshot) }.exceptionOrNull()
+                assertNotNull(failure)
+                assertEquals(existing.id, target.tasks().single().id)
+                assertEquals("original", target.setting("rollback_marker"))
+            }
+        }
+    }
+
     @Test fun unknownAndConfirmedZeroRemainDifferent() {
         val target=db("zero-${UUID.randomUUID()}.db")
         try {
