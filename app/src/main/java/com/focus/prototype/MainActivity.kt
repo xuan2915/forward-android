@@ -156,7 +156,7 @@ class MainActivity : ComponentActivity() {
          Text("游戏已获 ${games.earned} 局 · 已用 ${games.used} 局 · 每日 00:00 更新，额度 ${db.setting("boundary","4").padStart(2,'0')}:00 结算",style=MaterialTheme.typography.labelSmall,color=AppColors.Quiet)
          if(games.remaining > 0) TextButton(onClick={db.consume("game",1); refresh++}) { Text("手动记录已使用一局") }
         } }
-        items(tasks.filter{it.typeKnown && !it.required && it.done && !it.claimed},key={it.id}) { task -> CardBlock { Text("${task.title} · 领取一项奖励"); Row { if(task.rewardMinutes>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"video");refresh++}) {Text("${task.rewardMinutes} 分钟视频")}; if(task.rewardGames>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"game");refresh++}) {Text("${task.rewardGames} 局游戏") } }; if(!db.eligible()) Text("完成今日必做任务后可领取",color=AppColors.Muted) } }
+        items(tasks.filter{it.typeKnown && !it.required && it.done && !it.claimed},key={it.id}) { task -> CardBlock { Text("${task.title} · 领取一项奖励"); Row { if(task.rewardMinutes>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"video");refresh++}) {Text("${task.rewardMinutes} 分钟视频")}; if(task.rewardGames>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"game");refresh++}) {Text("${task.rewardGames} 局游戏") } }; db.rewardUnavailableReason(task.date)?.let { Text(it,color=AppColors.Muted) } } }
         item { TextButton(onClick={rewardControlsExpanded=!rewardControlsExpanded},modifier=Modifier.animateContentSize()) {Text(if(rewardControlsExpanded) "收起其他操作" else "应用保护与其他操作") } }
         if(rewardControlsExpanded) item { CardBlock {
          if(!c.emergency) EmergencyUnlock(db){refresh++} else TextButton(onClick={db.resumeProtection();refresh++}){Text("恢复应用保护")}

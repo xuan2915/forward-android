@@ -179,10 +179,10 @@ fun TaskDetailSheet(
                         Text("领取一项奖励", style = MaterialTheme.typography.titleMedium)
                         Text("每项选做奖励限领一次", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (task.rewardMinutes > 0) SecondaryAction("${task.rewardMinutes} 分钟", { db.claim(task, "video"); onChanged() }, enabled = db.eligible())
-                            if (task.rewardGames > 0) SecondaryAction("${task.rewardGames} 局", { db.claim(task, "game"); onChanged() }, enabled = db.eligible())
+                            if (task.rewardMinutes > 0) SecondaryAction("${task.rewardMinutes} 分钟", { db.claim(task, "video"); onChanged() }, enabled = db.rewardUnavailableReason(task.date) == null)
+                            if (task.rewardGames > 0) SecondaryAction("${task.rewardGames} 局", { db.claim(task, "game"); onChanged() }, enabled = db.rewardUnavailableReason(task.date) == null)
                         }
-                        if (!db.eligible()) Text("完成今日必做任务后可领取", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                        db.rewardUnavailableReason(task.date)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AppColors.Muted) }
                     }
                 } else if (task.claimed) {
                     Text("奖励已领取", style = MaterialTheme.typography.bodyMedium, color = AppColors.Muted)

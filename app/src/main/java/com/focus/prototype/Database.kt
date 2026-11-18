@@ -179,6 +179,17 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
  }
  fun goalState(date:String):DailyGoalState { val c=contract(date);return dailyGoalState(tasks(date,includeMoved=true),c.rest,date,day()) }
  fun eligible(day: String = day()): Boolean { val c = contract(day); val dayTasks=tasks(day,includeMoved=true); return setting("gate_changed_$day")!="true" && c.confirmed && dayTasks.all { it.typeKnown } && (requiredGoalAchieved(dayTasks) || dayTasks.none { it.required } && c.rest) }
+ fun rewardUnavailableReason(date:String):String? {
+  if(date!=day()) return "仅可领取当天任务的奖励"
+  val c=contract(date); val dayTasks=tasks(date,includeMoved=true)
+  return when {
+   setting("gate_changed_$date")=="true" -> "今日必做计划已变更，无法领取选做奖励"
+   !c.confirmed -> "请先在设置的今日计划中确认计划"
+   dayTasks.any { !it.typeKnown } -> "请先确认今日历史任务的类型"
+   !requiredGoalAchieved(dayTasks) && !(dayTasks.none { it.required } && c.rest) -> "完成今日必做任务后可领取"
+   else -> null
+  }
+ }
  private fun ledger(db: SQLiteDatabase, day: String, task: String, kind: String, amount: Long) = ledgerAt(db,day,task,kind,amount,System.currentTimeMillis())
  private fun ledgerAt(db: SQLiteDatabase, day: String, task: String, kind: String, amount: Long,created:Long) { db.insertOrThrow("ledger", null, cv("id" to UUID.randomUUID().toString(),"day" to day,"task_id" to task,"kind" to kind,"amount" to amount,"created" to created)) }
  private fun allocationKind(kind:String)="${kind}_allocation"
