@@ -47,7 +47,7 @@ fun GritWeeklyHeatMap(today: LocalDate, history: Map<String, String>, onDateSele
         val firstMonday = thisMonday.minusDays(51L * 7)
         (0..51).map { week -> GritWeek((0..6).map { firstMonday.plusDays(week * 7L + it) }) }
     }
-    val startIndex = (weeks.size - 9).coerceAtLeast(0)
+    val startIndex = weeks.lastIndex
     val state = rememberLazyListState(initialFirstVisibleItemIndex = startIndex)
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(24.dp)) {
         Row(

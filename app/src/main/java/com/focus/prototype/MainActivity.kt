@@ -45,8 +45,12 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+ companion object {
+  const val EXTRA_DESTINATION_PAGE = "destination_page"
+ }
  private var refresh by mutableIntStateOf(0)
  private var shareVersion by mutableIntStateOf(0)
+ private var requestedPage by mutableStateOf<Int?>(null)
  private fun receiveText(intent: Intent): Boolean {
   if(intent.action != Intent.ACTION_SEND || intent.type != "text/plain") return false
   val text=intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty()
@@ -55,7 +59,13 @@ class MainActivity : ComponentActivity() {
   intent.removeExtra(Intent.EXTRA_TEXT)
   return text.isNotBlank()
  }
- override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); if(receiveText(intent)) shareVersion++; refresh++ }
+ override fun onNewIntent(intent: Intent) {
+  super.onNewIntent(intent)
+  setIntent(intent)
+  if(intent.hasExtra(EXTRA_DESTINATION_PAGE)) requestedPage = intent.getIntExtra(EXTRA_DESTINATION_PAGE, 0)
+  if(receiveText(intent)) shareVersion++
+  refresh++
+ }
  override fun onResume() { super.onResume(); refresh++;runCatching { Database(this).use { NightWrapUpScheduler.reschedule(this,it) } } }
  override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState)
   val initialNavigation = resolveInitialNavigation(
@@ -74,10 +84,12 @@ class MainActivity : ComponentActivity() {
   val apps = packageManager.queryIntentActivities(launch,0).filter { store.canRestrict(it.activityInfo.packageName) }.distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(packageManager).toString() }
   setContent {
     // Keep navigation alive while this Activity is backgrounded; a fresh Activity follows its launch intent.
-    var page by remember { mutableIntStateOf(initialNavigation.page) }; var planManagement by remember { mutableStateOf(initialNavigation.openPlanManagement) }; var planSection by remember { mutableStateOf<String?>(if(initialNavigation.openPlanManagement) "import" else null) }; var settingsSection by remember { mutableStateOf<String?>(null) }; var editor by remember { mutableStateOf(false) };var showAllRewardHistory by remember { mutableStateOf(false) };var rewardControlsExpanded by remember { mutableStateOf(false) };var selectedRewardRecord by remember { mutableStateOf<String?>(null) };var taskFilter by remember { mutableIntStateOf(0) }
+    val launchDest = intent.getIntExtra(EXTRA_DESTINATION_PAGE, -1).takeIf { it >= 0 }
+    var page by remember { mutableIntStateOf(launchDest ?: initialNavigation.page) }; var planManagement by remember { mutableStateOf(initialNavigation.openPlanManagement) }; var planSection by remember { mutableStateOf<String?>(if(initialNavigation.openPlanManagement) "import" else null) }; var settingsSection by remember { mutableStateOf<String?>(null) }; var editor by remember { mutableStateOf(false) };var showAllRewardHistory by remember { mutableStateOf(false) };var rewardControlsExpanded by remember { mutableStateOf(false) };var selectedRewardRecord by remember { mutableStateOf<String?>(null) };var taskFilter by remember { mutableIntStateOf(0) }
     var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }; var editingTaskId by remember { mutableStateOf<String?>(null) };var movingTask by remember { mutableStateOf<Task?>(null) };var deletingTask by remember { mutableStateOf<Task?>(null) };var allAchievements by remember { mutableStateOf(false) }; var newAchievement by remember { mutableStateOf(nextUnseenAchievement(db)) }; var gritAnalyticsTaskId by remember { mutableStateOf<String?>(null) }; var dailyCardDate by remember { mutableStateOf<String?>(null) }; var dailyCardOpenDate by remember { mutableStateOf<String?>(null) }
     var detailMode by remember { mutableStateOf(if (BuildConfig.DEBUG) db.setting(DetailModeKey,"sheet") else "sheet") }; var inlineTaskId by remember { mutableStateOf<String?>(null) }
     fun dismissTaskActions() { movingTask=null; deletingTask=null; inlineTaskId=null }
+   LaunchedEffect(requestedPage) { requestedPage?.let { page = it; editor = false; planManagement = false; settingsSection = null; gritAnalyticsTaskId = null; allAchievements = false; dismissTaskActions(); requestedPage = null } }
    LaunchedEffect(shareVersion) { if(shareVersion>0) { page=0;planManagement=true;planSection="import";settingsSection=null;editor=false } }
    LaunchedEffect(Unit) { withContext(Dispatchers.IO) { IndependentBackup.saveIfDue(this@MainActivity, db) } }
    LaunchedEffect(Unit) { while(true) { db.settleToday();focusTimer.advance();if(now%10L==0L)db.checkpoint();now++; delay(1000) } }
@@ -92,10 +104,11 @@ class MainActivity : ComponentActivity() {
    LaunchedEffect(refresh) { if (newAchievement == null) newAchievement = nextUnseenAchievement(db) }
    FocusTheme { MotionHost(db.xp(),showToast=page!=2 && dailyCardOpenDate==null && dailyCardDate==null && (taskDetailsId!=null || newAchievement==null)) {
        val inlineDetailOpen = page == 0 && !editor && !planManagement && inlineTaskId != null
-       androidx.activity.compose.BackHandler(enabled=inlineDetailOpen || allAchievements || gritAnalyticsTaskId!=null || settingsSection!=null || planManagement || page==5 || editor || dailyCardOpenDate!=null || dailyCardDate!=null) {
-        when { dailyCardOpenDate!=null -> {DailyCards.markRevealSeen(db,dailyCardOpenDate!!);dailyCardOpenDate=null;refresh++}; dailyCardDate!=null -> dailyCardDate=null; allAchievements -> allAchievements=false; gritAnalyticsTaskId!=null -> gritAnalyticsTaskId=null; editor -> editor=false; settingsSection!=null -> settingsSection=null; planManagement && planSection!=null -> planSection=null; planManagement -> planManagement=false; page==5 -> page=0; inlineDetailOpen -> inlineTaskId=null; else -> page=0 }
+       androidx.activity.compose.BackHandler(enabled=newAchievement!=null || dailyCardOpenDate!=null || dailyCardDate!=null || inlineDetailOpen || allAchievements || gritAnalyticsTaskId!=null || settingsSection!=null || planManagement || page==5 || editor) {
+        when { newAchievement!=null -> {db.setSetting("achievement_seen_${newAchievement!!.id}","true");newAchievement=null;refresh++}; dailyCardOpenDate!=null -> {DailyCards.markRevealSeen(db,dailyCardOpenDate!!);dailyCardOpenDate=null;refresh++}; dailyCardDate!=null -> dailyCardDate=null; allAchievements -> allAchievements=false; gritAnalyticsTaskId!=null -> gritAnalyticsTaskId=null; editor -> editor=false; settingsSection!=null -> settingsSection=null; planManagement && planSection!=null -> planSection=null; planManagement -> planManagement=false; page==5 -> page=0; inlineDetailOpen -> inlineTaskId=null; else -> page=0 }
        }
-     Scaffold(containerColor=AppColors.Background, bottomBar = { if(taskDetailsId==null && gritAnalyticsTaskId==null && !allAchievements && page!=5 && !planManagement) AppNavigation(page){page=it;editor=false;planManagement=false;settingsSection=null;gritAnalyticsTaskId=null;allAchievements=false;dismissTaskActions()} }) { pad ->
+     Box(Modifier.fillMaxSize()) {
+      Scaffold(containerColor=AppColors.Background, bottomBar = { if(gritAnalyticsTaskId==null && !allAchievements && page!=5 && !planManagement) AppNavigation(page){page=it;editor=false;planManagement=false;settingsSection=null;gritAnalyticsTaskId=null;allAchievements=false;dismissTaskActions()} }) { pad ->
      Box(Modifier.fillMaxSize()) {
       AnimatedContent(targetState=page,transitionSpec={fadeIn(tween(AppMotion.Standard))+slideInHorizontally(tween(AppMotion.Standard)){it/28} togetherWith fadeOut(tween(AppMotion.Short))+slideOutHorizontally(tween(AppMotion.Short)){ -it/36 }},label="page-transition") { screen ->
       if (!editor && screen == 0 && !planManagement) {
@@ -118,15 +131,15 @@ class MainActivity : ComponentActivity() {
         expandedTaskId=inlineTaskId.takeIf{detailMode=="inline"},
         inlineDetail={ rowTask ->
          val live = remember(rowTask.id,tick) { db.task(rowTask.id) } ?: rowTask
-         TaskDetailBody(live,db,focusTimer,startEditing=false,showHeader=false,
-          onClose={after->inlineTaskId=null;after()},
-          onFocus={page=4},
-          onAnalytics={gritAnalyticsTaskId=live.id;page=2},
-          onChanged={refresh++})
+         CompositionLocalProvider(LocalContentColor provides AppColors.Text) {
+          TaskDetailBody(live,db,focusTimer,startEditing=false,showHeader=false,
+           onClose={after->inlineTaskId=null;after()},
+           onFocus={page=4},
+           onAnalytics={gritAnalyticsTaskId=live.id;page=2},
+           onChanged={refresh++})
+         }
         },
        )
-      } else if (!editor && screen == 2 && allAchievements) {
-       AchievementsPage(db,refresh){allAchievements=false}
       } else if (!editor && screen == 2 && gritAnalyticsTaskId != null) {
        GritHabitAnalyticsPage(db,gritAnalyticsTaskId!!,refresh, Modifier.padding(pad)) { gritAnalyticsTaskId=null }
       } else {
@@ -159,7 +172,7 @@ class MainActivity : ComponentActivity() {
          val video=db.rewardSnapshot("video");val games=db.rewardSnapshot("game")
          Text(if(!protected) "应用保护未开启" else if(c.emergency) "今天已紧急解锁" else if(video.remaining>0) "保护已开启 · 额度可用" else if(tasks.any{it.required && !it.done && it.rewardMinutes>0}) "必做任务奖励逐项到账" else if(tasks.any{it.required && it.done}) "娱乐时长已用完" else "暂无可用娱乐时长",color=if(video.remaining>0 && protected && !c.emergency) AppColors.Accent else AppColors.Muted,style=MaterialTheme.typography.labelMedium)
          Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
-          Column(verticalArrangement=Arrangement.spacedBy(2.dp)) { Text("${video.remaining / 60000}",fontSize=38.sp,fontWeight=FontWeight.Light,lineHeight=42.sp,color=AppColors.Reward); Text("剩余分钟",color=AppColors.Muted,style=MaterialTheme.typography.bodySmall) }
+          Column(verticalArrangement=Arrangement.spacedBy(2.dp)) { Text("${(video.remaining + 59_999L) / 60_000L}",fontSize=38.sp,fontWeight=FontWeight.Light,lineHeight=42.sp,color=AppColors.Reward); Text("剩余分钟",color=AppColors.Muted,style=MaterialTheme.typography.bodySmall) }
           Column(horizontalAlignment=Alignment.End,verticalArrangement=Arrangement.spacedBy(2.dp)) { Text("${games.remaining}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Light); Text("剩余游戏局数",color=AppColors.Muted,style=MaterialTheme.typography.bodySmall) }
          }
          Hairline()
@@ -183,8 +196,7 @@ class MainActivity : ComponentActivity() {
        }
        2 -> {
         item { GrowthHero(db,refresh){allAchievements=true;page=2} }
-        item { GrowthDetails(db,refresh,onAllAchievements={allAchievements=true},onHistoricalTask={task->taskDetailsId=task.id}) }
-        if(dailyCardRecords.isNotEmpty()) item { DailyCardArchive(dailyCardRecords,db){DailyCards.markRevealSeen(db,it);dailyCardDate=it;refresh++} }
+        item { GrowthDetails(db,refresh,onAllAchievements={allAchievements=true},onHistoricalTask={task->taskDetailsId=task.id},onOpenDailyCard={date->dailyCardOpenDate=date;refresh++}) }
        }
        4 -> { item { FocusScreen(db,focusTimer,tasks,onTasks={page=0},onChanged={refresh++}) } }
         5 -> {
@@ -228,7 +240,14 @@ class MainActivity : ComponentActivity() {
       }
       }
      }
+       }
+      if (!editor && page == 2 && allAchievements) {
+       Box(Modifier.fillMaxSize().background(AppColors.Background)) {
+        AchievementsPage(db,refresh){allAchievements=false}
+       }
+      }
     }
+   }
      selectedRewardRecord?.let { record -> AlertDialog(onDismissRequest={selectedRewardRecord=null},title={Text("奖励记录详情")},text={Text(record)},confirmButton={TextButton(onClick={selectedRewardRecord=null}){Text("完成")}}) }
      if(showAllRewardHistory) AlertDialog(onDismissRequest={showAllRewardHistory=false},title={Text("奖励记录")},text={
       val records=db.rewardHistory()
@@ -236,7 +255,7 @@ class MainActivity : ComponentActivity() {
        items(records){record->TextButton(onClick={selectedRewardRecord=record;showAllRewardHistory=false},contentPadding=PaddingValues(vertical=6.dp,horizontal=0.dp)){Text(record,style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)} }
       }
      },confirmButton={TextButton(onClick={showAllRewardHistory=false}){Text("完成")}})
-     dailyCardOpenDate?.let { date ->
+     dailyCardOpenDate?.takeIf { newAchievement == null }?.let { date ->
       val record = dailyCardRecords.firstOrNull { it.date == date } ?: DailyCards.load(db,date)
       record?.let { DailyCardDialog(it,db,onEdit={DailyCards.markRevealSeen(db,date);dailyCardOpenDate=null;dailyCardDate=date;refresh++},onDismiss={DailyCards.markRevealSeen(db,date);dailyCardOpenDate=null;refresh++}) }
      }
@@ -251,7 +270,7 @@ class MainActivity : ComponentActivity() {
       onDismiss={taskDetailsId=null;editingTaskId=null}, onFocus={taskDetailsId=null;editingTaskId=null;page=4}, onChanged={refresh++},
       onAnalytics={taskDetailsId=null;editingTaskId=null;gritAnalyticsTaskId=detailTask.id;page=2},
       )
-     newAchievement?.takeIf { taskDetailsId == null && dailyCardOpenDate==null && dailyCardDate==null }?.let { achievement ->
+     newAchievement?.takeIf { taskDetailsId == null && dailyCardDate == null }?.let { achievement ->
       fun acknowledgeAchievement(openAll:Boolean) {
        db.setSetting("achievement_seen_${achievement.id}","true")
        newAchievement=null
@@ -271,16 +290,10 @@ class MainActivity : ComponentActivity() {
 }
 }
 
-}
-
 @Composable private fun Header(label:String,title:String) { PageHeading(label,title) }
 @Composable private fun CardBlock(content:@Composable ColumnScope.()->Unit) { QuietSurface(Modifier.animateContentSize(animationSpec=motionSizeSpec()),content=content) }
 @Composable private fun NumberField(label:String,value:String,onValue:(String)->Unit) { OutlinedTextField(value,onValueChange={onValue(it.filter(Char::isDigit).take(4))},label={Text(label)},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),singleLine=true,modifier=Modifier.fillMaxWidth()) }
-internal fun focusDuration(milliseconds:Long):String = when {
- milliseconds < 60_000 -> "${milliseconds/1_000} 秒"
- milliseconds < 3_600_000 -> "${milliseconds/60_000} 分钟"
- else -> "${milliseconds/3_600_000} 小时 ${(milliseconds%3_600_000)/60_000} 分"
-}
+internal fun focusDuration(milliseconds:Long):String = formatDurationMs(milliseconds)
 
 @Composable private fun ContractEditor(db:Database,c:Contract,onChanged:()->Unit) {
  var minutes by remember { mutableStateOf("30") }; var games by remember { mutableStateOf("0") }; var rest by remember { mutableStateOf(false) }
@@ -288,7 +301,7 @@ internal fun focusDuration(milliseconds:Long):String = when {
 }
 
 @Composable private fun TaskEditor(day:String,db:Database,onCancel:()->Unit,onSave:()->Unit) {
- var title by remember { mutableStateOf("") }; var required by remember { mutableStateOf(!db.contract(day).confirmed) }; var minutes by remember { mutableStateOf("25") }; var mode by remember { mutableStateOf("行动型") }; var checklist by remember { mutableStateOf("") }; var video by remember { mutableStateOf(if(!db.contract(day).confirmed) "10" else "20") }; var games by remember { mutableStateOf(if(!db.contract(day).confirmed) "0" else "1") }; var recurrence by remember { mutableStateOf("once") };var weekdays by remember{mutableStateOf(setOf(1,2,3,4,5))};var intervalDays by remember{mutableStateOf("3")};var repeatExpanded by remember{mutableStateOf(false)};var rewardsExpanded by remember{mutableStateOf(false)}
+ var title by remember { mutableStateOf("") }; var required by remember { mutableStateOf(!db.contract(day).confirmed) }; var minutes by remember { mutableIntStateOf(30) }; var mode by remember { mutableStateOf("行动型") }; var checklist by remember { mutableStateOf("") }; var video by remember { mutableStateOf(if(!db.contract(day).confirmed) "10" else "20") }; var games by remember { mutableStateOf(if(!db.contract(day).confirmed) "0" else "1") }; var recurrence by remember { mutableStateOf("once") };var weekdays by remember{mutableStateOf(setOf(1,2,3,4,5))};var intervalDays by remember{mutableStateOf("3")};var repeatExpanded by remember{mutableStateOf(false)};var rewardsExpanded by remember{mutableStateOf(false)}
  val repeatLabel=when {recurrence=="daily"->"每天";recurrence=="weekly"->"每周同日";recurrence.startsWith("days:")->"指定星期";recurrence.startsWith("interval:")->"每隔 ${intervalDays} 天";else->"仅此一次"}
  Header("PLAN / $day","添加任务")
  CardBlock {
@@ -298,7 +311,7 @@ internal fun focusDuration(milliseconds:Long):String = when {
    FilterChip(selected=required,onClick={if(!db.contract(day).confirmed){required=true;video="10";games="0"}},label={Text("必做")},enabled=!db.contract(day).confirmed)
    FilterChip(selected=!required,onClick={required=false;video="20";games="1"},label={Text("选做")})
   }
-  NumberField("目标专注分钟",minutes){minutes=it}
+  DurationPicker(minutes, onMinutesChange = { minutes = it })
   androidx.compose.material3.HorizontalDivider(color=AppColors.Border)
   Text("验收要求",style=MaterialTheme.typography.titleMedium)
   Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)) { listOf("行动型","成果型","掌握型").forEach { type -> FilterChip(selected=mode==type,onClick={mode=type},label={Text(type)},modifier=Modifier.weight(1f)) } }
@@ -325,7 +338,7 @@ internal fun focusDuration(milliseconds:Long):String = when {
   }
   Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
    val canSave=title.isNotBlank() && recurrence!="days:" && (!recurrence.startsWith("interval:") || (intervalDays.toIntOrNull()?:0) in 1..365) && (!db.contract(day).confirmed || !required)
-   Button(enabled=canSave,onClick={ db.addTask(day,title,required,minutes.toIntOrNull()?:0,mode,checklist,video.toIntOrNull()?:0,games.toIntOrNull()?:0,recurrence); onSave() },modifier=Modifier.weight(1f).heightIn(min=48.dp).clip(RoundedCornerShape(50)).immediatePress(canSave)) {Text("保存任务")}
+   Button(enabled=canSave,onClick={ db.addTask(day,title,required,minutes,mode,checklist,video.toIntOrNull()?:0,games.toIntOrNull()?:0,recurrence); onSave() },modifier=Modifier.weight(1f).heightIn(min=48.dp).clip(RoundedCornerShape(50)).immediatePress(canSave)) {Text("保存任务")}
    TextButton(onClick=onCancel,modifier=Modifier.heightIn(min=48.dp)){Text("取消")}
   }
  }

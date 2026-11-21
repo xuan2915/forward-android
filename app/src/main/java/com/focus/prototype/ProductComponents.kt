@@ -28,17 +28,26 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import java.time.LocalDate
 import java.util.Locale
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,24 +58,84 @@ import kotlin.math.ceil
 
 @Composable fun AppNavigation(page:Int,onPage:(Int)->Unit) {
  val tabs=listOf(0 to "今天",4 to "专注",1 to "奖励",2 to "成长")
+ val selectedIndex = tabs.indexOfFirst { it.first == page }.coerceAtLeast(0)
  val haptics=LocalHapticFeedback.current
+
+ val bounds = remember { mutableStateMapOf<Int, Rect>() }
+ val targetRect = bounds[selectedIndex]
+ val duration = motionMillis(AppMotion.Standard)
+ val pillLeft by animateFloatAsState(
+  targetValue = targetRect?.left ?: 0f,
+  animationSpec = androidx.compose.animation.core.tween(duration, easing = AppMotion.Ease),
+  label = "nav-pill-left",
+ )
+ val pillRight by animateFloatAsState(
+  targetValue = targetRect?.right ?: 0f,
+  animationSpec = androidx.compose.animation.core.tween(duration, easing = AppMotion.Ease),
+  label = "nav-pill-right",
+ )
+ val pillTop = targetRect?.top ?: 0f
+ val pillHeight = targetRect?.height ?: 0f
+
  Surface(modifier=Modifier.navigationBarsPadding().padding(horizontal=16.dp,vertical=8.dp),shape=RoundedCornerShape(25.dp),color=AppColors.Surface,border=BorderStroke(1.dp,AppColors.Border)) {
-  Row(Modifier.fillMaxWidth().height(70.dp)) {
-   tabs.forEachIndexed { index,(destination,title) ->
-    val selected=page==destination
-    val tint by animateColorAsState(if(selected)AppColors.Accent else AppColors.Quiet,label="navigation-tint")
-    Column(Modifier.weight(1f).fillMaxHeight().clickable { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove);onPage(destination) }.padding(top=10.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(4.dp)) {
-     Canvas(Modifier.size(21.dp)) {
-      val w=size.width;val h=size.height;val stroke=1.6.dp.toPx()
-      when(index) {
-       0 -> for(x in 0..1)for(y in 0..1)drawRoundRect(tint,Offset(x*w*.55f,y*h*.55f),Size(w*.38f,h*.38f),style=Stroke(stroke))
-       1 -> {drawCircle(tint,w*.42f,style=Stroke(stroke));drawLine(tint,Offset(w*.5f,h*.12f),Offset(w*.5f,h*.5f),stroke);drawLine(tint,Offset(w*.5f,h*.5f),Offset(w*.7f,h*.65f),stroke)}
-       2 -> {drawLine(tint,Offset(w*.5f,0f),Offset(w*.9f,h*.5f),stroke);drawLine(tint,Offset(w*.9f,h*.5f),Offset(w*.5f,h),stroke);drawLine(tint,Offset(w*.5f,h),Offset(w*.1f,h*.5f),stroke);drawLine(tint,Offset(w*.1f,h*.5f),Offset(w*.5f,0f),stroke)}
-       3 -> {drawLine(tint,Offset(0f,h*.85f),Offset(w*.35f,h*.5f),stroke);drawLine(tint,Offset(w*.35f,h*.5f),Offset(w*.6f,h*.65f),stroke);drawLine(tint,Offset(w*.6f,h*.65f),Offset(w,h*.15f),stroke)}
-      }
+  Box(
+   modifier = Modifier
+    .fillMaxWidth()
+    .height(68.dp)
+    .drawBehind {
+     if (pillRight > pillLeft && pillHeight > 0f) {
+      val pillWidth = pillRight - pillLeft
+      val padH = 6.dp.toPx()
+      val padV = 5.dp.toPx()
+      drawRoundRect(
+       color = AppColors.Raised,
+       topLeft = Offset(pillLeft + padH, pillTop + padV),
+       size = Size((pillWidth - padH * 2).coerceAtLeast(0f), (pillHeight - padV * 2).coerceAtLeast(0f)),
+       cornerRadius = CornerRadius(16.dp.toPx(), 16.dp.toPx()),
+      )
      }
-     Text(title,fontSize=11.sp,color=tint,fontWeight=if(selected)FontWeight.SemiBold else FontWeight.Normal)
-     Spacer(Modifier.size(3.dp))
+    }
+  ) {
+   Row(Modifier.fillMaxSize()) {
+    tabs.forEachIndexed { index,(destination,title) ->
+     val isSelected=page==destination
+     val tint by animateColorAsState(if(isSelected)AppColors.Accent else AppColors.Quiet,androidx.compose.animation.core.tween(duration, easing = AppMotion.Ease),label="navigation-tint")
+     Column(
+      Modifier
+       .weight(1f)
+       .fillMaxHeight()
+       .onGloballyPositioned { coordinates ->
+        val at = coordinates.positionInParent()
+        val rect = Rect(at, Size(coordinates.size.width.toFloat(), coordinates.size.height.toFloat()))
+        if (bounds[index] != rect) bounds[index] = rect
+       }
+       .clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+       ) {
+        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        onPage(destination)
+       }
+       .semantics {
+        this.selected = isSelected
+        contentDescription = title
+       }
+       .padding(top=10.dp),
+      horizontalAlignment=Alignment.CenterHorizontally,
+      verticalArrangement=Arrangement.spacedBy(4.dp)
+     ) {
+      Canvas(Modifier.size(21.dp)) {
+       val w=size.width;val h=size.height;val stroke=1.6.dp.toPx()
+       when(index) {
+        0 -> for(x in 0..1)for(y in 0..1)drawRoundRect(tint,Offset(x*w*.55f,y*h*.55f),Size(w*.38f,h*.38f),style=Stroke(stroke))
+        1 -> {drawCircle(tint,w*.42f,style=Stroke(stroke));drawLine(tint,Offset(w*.5f,h*.12f),Offset(w*.5f,h*.5f),stroke);drawLine(tint,Offset(w*.5f,h*.5f),Offset(w*.7f,h*.65f),stroke)}
+        2 -> {drawLine(tint,Offset(w*.5f,0f),Offset(w*.9f,h*.5f),stroke);drawLine(tint,Offset(w*.9f,h*.5f),Offset(w*.5f,h),stroke);drawLine(tint,Offset(w*.5f,h),Offset(w*.1f,h*.5f),stroke);drawLine(tint,Offset(w*.1f,h*.5f),Offset(w*.5f,0f),stroke)}
+        3 -> {drawLine(tint,Offset(0f,h*.85f),Offset(w*.35f,h*.5f),stroke);drawLine(tint,Offset(w*.35f,h*.5f),Offset(w*.6f,h*.65f),stroke);drawLine(tint,Offset(w*.6f,h*.65f),Offset(w,h*.15f),stroke)}
+       }
+      }
+      Text(title,fontSize=11.sp,color=tint,fontWeight=if(isSelected)FontWeight.SemiBold else FontWeight.Normal)
+      Spacer(Modifier.size(3.dp))
+     }
     }
    }
   }
@@ -92,7 +161,7 @@ private data class GrowthSnapshot(val planDays: Int, val achievedDays: Int, val 
   Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
    Column(verticalArrangement=Arrangement.spacedBy(3.dp)) {
     Text("等级 $level · $rank",style=MaterialTheme.typography.headlineSmall.copy(fontWeight=FontWeight.ExtraBold))
-    Text("累计成长",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+    Text("每完成一项任务 +100 XP",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
    }
    Row(verticalAlignment=Alignment.Bottom,horizontalArrangement=Arrangement.spacedBy(5.dp)) {
     MotionCounter(xp,MaterialTheme.typography.headlineSmall.copy(fontWeight=FontWeight.Bold),AppMotion.Growth)
@@ -108,8 +177,6 @@ private data class GrowthSnapshot(val planDays: Int, val achievedDays: Int, val 
   }
   GrowthFeedback()
   GritGrowthStats(snapshot,onAllAchievements)
-  val unknownDurations = remember(db,refreshKey) { db.readableDatabase.rawQuery("SELECT COUNT(*) FROM tasks WHERE elapsed IS NULL",null).use { it.moveToFirst(); it.getInt(0) } }
-  if(unknownDurations>0) Text("部分历史任务时长未知，专注统计仅包含已知记录",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
  }
 }
 

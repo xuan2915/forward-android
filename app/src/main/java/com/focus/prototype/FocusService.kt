@@ -13,6 +13,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityWindowInfo
 import android.view.WindowManager
 import android.graphics.Color
 import android.graphics.Typeface
@@ -22,6 +23,19 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 // Foreground-package event handling adapted from SelfLock (MIT); see LICENSES/SelfLock.txt.
+internal class TransitionCheckTimeline(private val delaysMs: LongArray) {
+    private var startedAtMs = 0L
+
+    fun restart(startAtMs: Long): Long {
+        startedAtMs = startAtMs
+        return deadline(0)
+    }
+
+    fun deadline(step: Int): Long = startedAtMs + delaysMs[step]
+
+    fun deadlines(): LongArray = LongArray(delaysMs.size) { index -> startedAtMs + delaysMs[index] }
+}
+
 class FocusService : AccessibilityService() {
     companion object {
         @Volatile var connected = false
@@ -30,6 +44,15 @@ class FocusService : AccessibilityService() {
 
         fun overlayDismissed() {
             activeService?.dismissBlockActivity()
+        }
+
+        fun overlayLeftByUser(pkg: String?) {
+            activeService?.let {
+                it.dismissedPackage = pkg
+                it.dismissedAt = SystemClock.elapsedRealtime()
+                it.dismissBlockActivity()
+                it.startTransitionChecks()
+            }
         }
 
         fun overlayShown() {
@@ -47,6 +70,9 @@ class FocusService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private var current: String? = null
     private var foregroundEventAt = 0L
+    private var homePackage: String? = null
+    private var dismissedPackage: String? = null
+    private var dismissedAt = 0L
     private var lastDecision: String? = null
     private var lastTick = 0L
     private var blockActivityShowing = false
@@ -58,6 +84,7 @@ class FocusService : AccessibilityService() {
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == Intent.ACTION_SCREEN_OFF) {
+                handler.removeCallbacks(transitionCheck)
                 charge(screenJustOff = true)
                 bedtimeDialog?.dismiss()
                 current = null
@@ -86,6 +113,7 @@ class FocusService : AccessibilityService() {
     override fun onServiceConnected() {
         if (activeService === this) return
         store = Store(this)
+        homePackage = packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)?.activityInfo?.packageName
         db = Database(this)
         activeService = this
         connected = true
@@ -100,12 +128,18 @@ class FocusService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (!connected || !::db.isInitialized || !screenAvailable()) return
+        if (activeService !== this || !::db.isInitialized || !screenAvailable()) return
         if (bedtimeDialog?.isShowing == true) return
         val pkg = event?.packageName?.toString()
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg == homePackage) startTransitionChecks()
+        if (syncFocusedApplication()) {
+            enforce()
+            return
+        }
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
-            pkg != null && pkg in store.selected) {
+            pkg != null && (pkg == homePackage || pkg in store.selected)) {
             foregroundEventAt = SystemClock.elapsedRealtime()
+            trace("event=${role(pkg)} current=${role(current)}")
             updateForeground(pkg)
         } else {
             syncForeground()
@@ -113,19 +147,73 @@ class FocusService : AccessibilityService() {
         enforce()
     }
 
+    private var transitionStep = 0
+    private val transitionDelays = longArrayOf(220L, 760L, 1400L)
+    private val transitionTimeline = TransitionCheckTimeline(transitionDelays)
+    private val transitionCheck = object : Runnable {
+        override fun run() {
+            if (activeService !== this@FocusService || !screenAvailable()) return
+            trace("transition check step=$transitionStep")
+            foregroundEventAt = 0L
+            if (syncForeground()) enforce()
+            if (++transitionStep < transitionDelays.size) {
+                handler.postAtTime(this, transitionTimeline.deadline(transitionStep))
+            }
+        }
+    }
+
+    private fun startTransitionChecks() {
+        val now = SystemClock.uptimeMillis()
+        handler.removeCallbacks(transitionCheck)
+        transitionStep = 0
+        handler.postAtTime(transitionCheck, transitionTimeline.restart(now))
+    }
+
     private fun screenAvailable() =
         getSystemService(PowerManager::class.java).isInteractive &&
             !getSystemService(KeyguardManager::class.java).isKeyguardLocked
 
+    private var previousTrace = ""
+    private fun trace(state: String) {
+        if (!BuildConfig.DEBUG || previousTrace == state) return
+        previousTrace = state
+        Log.d("ForwardTrace", state)
+    }
+
+    private fun role(pkg: String?) = when {
+        pkg == null -> "none"
+        pkg == homePackage -> "home"
+        pkg == packageName -> "forward"
+        pkg in store.selected -> "restricted"
+        else -> "other"
+    }
+
+    // Recents can emit a late Launcher event even after another app has focus.
+    private fun syncFocusedApplication(): Boolean {
+        val focused = windows.firstOrNull {
+            it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isFocused
+        } ?: return false
+        val pkg = focused.root?.packageName?.toString() ?: return false
+        trace("focused=${role(pkg)} current=${role(current)} overlay=$blockActivityShowing")
+        foregroundEventAt = 0L
+        updateForeground(pkg)
+        return true
+    }
+
     private fun syncForeground(): Boolean {
         if (!screenAvailable() || bedtimeDialog?.isShowing == true) return false
+        if (syncFocusedApplication()) return true
         if (foregroundEventAt != 0L && SystemClock.elapsedRealtime() - foregroundEventAt < 600L) return true
-        val pkg = rootInActiveWindow?.packageName?.toString() ?: return false
+        val pkg = rootInActiveWindow?.packageName?.toString()
+        trace("root=${role(pkg)} current=${role(current)} overlay=$blockActivityShowing")
+        if (pkg == null) return false
         updateForeground(pkg)
         return true
     }
 
     private fun updateForeground(pkg: String) {
+        // Home can expose the blocked app's old window while the launcher takes focus.
+        if (pkg == dismissedPackage && SystemClock.elapsedRealtime() - dismissedAt < 700L) { trace("suppressed recently dismissed app"); return }
         if (pkg == packageName && blockActivityShowing) return
         if (pkg == current) return
         charge()
@@ -182,6 +270,7 @@ class FocusService : AccessibilityService() {
     private fun show() {
         if (blockLaunchDeadline != 0L) Log.w("ForwardControl", "block activity not acknowledged; retrying")
         blockActivityShowing = true
+        trace("launch block")
         blockLaunchDeadline = SystemClock.elapsedRealtime() + 2500L
         runCatching { startActivity(Intent(this, BlockOverlayActivity::class.java)
             .putExtra(BlockOverlayActivity.EXTRA_BLOCKED_PACKAGE, current)
@@ -252,8 +341,11 @@ class FocusService : AccessibilityService() {
     }
 
     override fun onDestroy() {
-        connected = false
-        activeService = null
+        if (activeService === this) {
+            connected = false
+            activeService = null
+        }
+        handler.removeCallbacks(transitionCheck)
         handler.removeCallbacks(tick)
         bedtimeDialog?.dismiss()
         if (!::db.isInitialized) {

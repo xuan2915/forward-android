@@ -534,9 +534,9 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   while(!cursor.isAfter(end)) {
    val date=cursor.toString()
    val contractRow=readableDatabase.rawQuery("SELECT confirmed,rest FROM contracts WHERE day=?",arrayOf(date)).use{if(it.moveToFirst())(it.getInt(0)!=0) to (it.getInt(1)!=0) else null}
-   var required=0;var done=0;var unknown=0
-   readableDatabase.rawQuery("SELECT required,done,type_known FROM tasks WHERE day=? AND id NOT IN (SELECT source_id FROM task_moves)",arrayOf(date)).use{while(it.moveToNext()){if(it.getInt(2)==0) unknown++ else if(it.getInt(0)!=0){required++;if(it.getInt(1)!=0)done++}}}
-   val valid=contractRow?.second!=true&&required>0&&unknown==0
+   var required=0;var done=0
+   readableDatabase.rawQuery("SELECT required,done FROM tasks WHERE day=?",arrayOf(date)).use{while(it.moveToNext()){if(it.getInt(0)!=0){required++;if(it.getInt(1)!=0)done++}}}
+   val valid=contractRow?.second!=true&&required>0
    if(valid){plan30++;if(done==required)achieved30++;if(!cursor.isBefore(from7)){plan7++;if(done==required)achieved7++}}
    cursor=cursor.plusDays(1)
   }

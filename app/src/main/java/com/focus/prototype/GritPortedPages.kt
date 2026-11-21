@@ -252,9 +252,6 @@ internal fun GritTaskListPage(
                         )
                     }
                 }
-                if (dailyCardQualifies(tasks)) {
-                    dailyCard?.let { record -> item(key = "daily-card-${record.date}") { DailyCardReveal(record, db, onEditDailyCard) } }
-                }
             }
             androidx.compose.material3.FloatingActionButton(
                 onClick = onAdd,

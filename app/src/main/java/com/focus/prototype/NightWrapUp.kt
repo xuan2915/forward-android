@@ -37,6 +37,7 @@ internal fun NightWrapUpCard(db: Database, refreshKey: Int, onChanged: () -> Uni
     val context = LocalContext.current
     var config by remember(refreshKey) { mutableStateOf(db.nightWrapUpConfig()) }
     var message by remember { mutableStateOf("") }
+    var isError by remember { mutableStateOf(false) }
     val notificationGranted = NightWrapUpScheduler.notificationPermissionGranted(context)
     val exactGranted = NightWrapUpScheduler.exactAlarmAvailable(context)
     val focusServiceEnabled = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
@@ -55,18 +56,29 @@ internal fun NightWrapUpCard(db: Database, refreshKey: Int, onChanged: () -> Uni
 
     QuietSurface {
         Text("夜间时间", style = MaterialTheme.typography.titleMedium)
-        NightTimeRow("开始收尾", config.windDown) { config = config.copy(windDown = it) }
-        NightTimeRow("停止新工作", config.workCutoff) { config = config.copy(workCutoff = it) }
-        NightTimeRow("娱乐截止", config.entertainmentCutoff) { config = config.copy(entertainmentCutoff = it) }
-        NightTimeRow("准备就寝", config.bedtime) { config = config.copy(bedtime = it) }
-        NightTimeRow("早晨解除限制", config.morningRelease) { config = config.copy(morningRelease = it) }
+        NightTimeRow("开始收尾", config.windDown) { config = config.copy(windDown = it); message = "" }
+        NightTimeRow("停止新工作", config.workCutoff) { config = config.copy(workCutoff = it); message = "" }
+        NightTimeRow("娱乐截止", config.entertainmentCutoff) { config = config.copy(entertainmentCutoff = it); message = "" }
+        NightTimeRow("准备就寝", config.bedtime) { config = config.copy(bedtime = it); message = "" }
+        NightTimeRow("早晨解除限制", config.morningRelease) { config = config.copy(morningRelease = it); message = "" }
         Text("工作截止时可结束，或延长一次 30 分钟。到时只提醒，不会结束计时或关闭后台应用", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
         Text("00:00 任务日期切换与 04:00 娱乐额度重置保持独立", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+        val validationError = runCatching { config.validate() }.exceptionOrNull()?.message
+        if (validationError != null && message.isBlank()) {
+            Text(validationError, style = MaterialTheme.typography.bodySmall, color = AppColors.Warning)
+        }
         Button(onClick = {
-            runCatching { db.saveNightWrapUpConfig(config); NightWrapUpScheduler.reschedule(context, db) }
-                .onSuccess { message = "夜间时间已保存"; onChanged() }
-                .onFailure { message = it.message ?: "时间顺序不正确" }
+            runCatching {
+                config.validate()
+                db.saveNightWrapUpConfig(config)
+                NightWrapUpScheduler.reschedule(context, db)
+            }
+                .onSuccess { message = "夜间时间已保存"; isError = false; onChanged() }
+                .onFailure { message = it.message ?: "时间顺序不正确"; isError = true }
         }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("保存时间") }
+        if (message.isNotBlank()) {
+            Text(message, style = MaterialTheme.typography.bodySmall, color = if (isError) AppColors.Warning else AppColors.Accent)
+        }
     }
 
     QuietSurface {
@@ -127,7 +139,6 @@ internal fun NightWrapUpCard(db: Database, refreshKey: Int, onChanged: () -> Uni
         if (pendingMinutes > 0 || pendingGames > 0) Text("后续奖励待抵扣 $pendingMinutes 分钟 · $pendingGames 局", color = AppColors.Warning)
         Text("这只是夜间行为记录，不是睡眠时间或入睡证明", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
     }
-    if (message.isNotBlank()) Text(message, style = MaterialTheme.typography.bodySmall, color = AppColors.Accent)
 }
 
 @Composable

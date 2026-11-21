@@ -17,7 +17,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
@@ -30,6 +32,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kizitonwose.calendar.compose.HorizontalCalendar
@@ -38,15 +41,19 @@ import com.kizitonwose.calendar.core.CalendarDay
 import com.kizitonwose.calendar.core.DayPosition
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.Instant
+import java.time.ZoneId
 import java.time.YearMonth
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
 
 private data class DayStats(val date: LocalDate, val completed: Int, val total: Int, val focusMinutes: Long)
 private data class AuditEntry(val date: String, val detail: String)
+internal data class WeeklyCompletion(val title: String, val completedAt: Long, val elapsed: Long, val elapsedKnown: Boolean)
 private enum class GrowthSection(val label: String) { CALENDAR("日历"), TREND("趋势"), MILESTONES("里程碑") }
 
 @Composable
-fun GrowthDetails(db: Database, refreshKey: Int = 0, onAllAchievements: () -> Unit = {}, onHistoricalTask:(Task)->Unit = {}) {
+fun GrowthDetails(db: Database, refreshKey: Int = 0, onAllAchievements: () -> Unit = {}, onHistoricalTask:(Task)->Unit = {}, onOpenDailyCard: (String) -> Unit = {}) {
     val today = LocalDate.parse(db.day())
     val history = db.history(requireKnownTypes = false).toMap()
     var selectedDate by remember(today) { mutableStateOf(today) }
@@ -66,15 +73,6 @@ fun GrowthDetails(db: Database, refreshKey: Int = 0, onAllAchievements: () -> Un
     // This composable is hosted by a LazyColumn item. Keep every section in one
     // vertical layout; otherwise Compose places its sibling roots in the same slot.
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        GritAnalyticsHeader("过去一年", icon = R.drawable.grit_heat)
-        GritWeeklyHeatMap(today, history) { selectedDate = it; section = GrowthSection.CALENDAR }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            CalendarLegend(AppColors.Accent, "完成")
-            CalendarLegend(AppColors.Border, "休息")
-            CalendarLegend(AppColors.Missed, "未完成")
-            CalendarLegend(MaterialTheme.colorScheme.surfaceContainerHigh, "无必做")
-        }
-
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             GrowthSection.entries.forEach { item ->
                 FilterChip(
@@ -103,8 +101,8 @@ fun GrowthDetails(db: Database, refreshKey: Int = 0, onAllAchievements: () -> Un
             label = "growth-section",
         ) { visibleSection ->
             when (visibleSection) {
-                GrowthSection.CALENDAR -> CalendarSection(db, today, history, selectedDate, calendarState, scope, refreshKey, { selectedDate = it }, onHistoricalTask)
-                GrowthSection.TREND -> TrendSection(db, today)
+                GrowthSection.CALENDAR -> CalendarSection(db, today, history, selectedDate, calendarState, scope, refreshKey, { selectedDate = it }, onHistoricalTask, onOpenDailyCard)
+                GrowthSection.TREND -> TrendSection(db, today, refreshKey, history) { selectedDate = it; section = GrowthSection.CALENDAR }
                 GrowthSection.MILESTONES -> MilestoneSection(db, refreshKey, onAllAchievements)
             }
         }
@@ -122,6 +120,7 @@ private fun CalendarSection(
     refreshKey: Int,
     onDateSelected: (LocalDate) -> Unit,
     onHistoricalTask:(Task)->Unit,
+    onOpenDailyCard: (String) -> Unit = {},
 ) {
     val visibleMonth = calendarState.firstVisibleMonth.yearMonth
     val monthDays = (1..visibleMonth.lengthOfMonth()).map { visibleMonth.atDay(it) }
@@ -132,7 +131,7 @@ private fun CalendarSection(
     // Calendar grid, date controls, and selected-day detail are separate vertical
     // blocks so the variable-height detail can never be painted over the month.
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        GritAnalyticsHeader("成长日历", icon = R.drawable.grit_calendar)
+        GritAnalyticsHeader("计划日历", icon = R.drawable.grit_calendar)
         QuietSurface {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 TextButton(onClick = { scope.launch { calendarState.animateScrollToMonth(visibleMonth.minusMonths(1)) } }) { Text("‹", color = AppColors.Muted, fontSize = 24.sp) }
@@ -175,47 +174,99 @@ private fun CalendarSection(
             )
         }
 
-        val selectedDayDuration = motionMillis(AppMotion.Standard)
-        val selectedDayExitDuration = motionMillis(AppMotion.Short)
-        AnimatedContent(
-            targetState = selectedDate,
-            transitionSpec = {
-                val direction = if (targetState.isAfter(initialState)) 1 else -1
-                (fadeIn(tween(selectedDayDuration)) + slideInHorizontally(tween(selectedDayDuration)) { it / 20 * direction }) togetherWith
-                    (fadeOut(tween(selectedDayExitDuration)) + slideOutHorizontally(tween(selectedDayExitDuration)) { -it / 24 * direction })
-            },
-            label = "growth-selected-day",
-        ) { visibleDate ->
-            val selectedState = history[visibleDate.toString()]
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                GritAnalyticsHeader("${visibleDate.monthValue}月${visibleDate.dayOfMonth}日", icon = R.drawable.grit_analytics) {
-                    StatusPill(selectedState ?: "未安排", active = selectedState == "完成")
-                }
-                QuietSurface {
-                    val selectedTasks = db.tasks(visibleDate.toString())
-                    if (selectedTasks.isEmpty()) {
-                        Text("这一天还没有任务记录", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-                    } else selectedTasks.forEachIndexed { index, task ->
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            CompletionMark(task.done)
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(task.title, style = MaterialTheme.typography.bodyMedium, color = AppColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                val completedAt=task.completedAt.takeIf { task.done && it>0L }?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime() }
-                                val completionNote=completedAt?.let { actual -> if(actual.toLocalDate().toString()!=task.date) "跨日补记 · 实际完成 ${actual.monthValue}月${actual.dayOfMonth}日 ${actual.toLocalTime().toString().take(5)}" else "完成于 ${actual.toLocalTime().toString().take(5)}" }
-                                Text(buildString { append(if (!task.elapsedKnown) "专注时长未知" else if (task.minutes > 0) "${focusDuration(db.elapsed(task))} / 目标 ${task.minutes} 分钟" else "专注 ${focusDuration(db.elapsed(task))}");if(completionNote!=null)append(" · $completionNote") }, style = MaterialTheme.typography.labelSmall, color = if(completionNote?.startsWith("跨日")==true)AppColors.Accent else AppColors.Muted, maxLines=2, overflow=TextOverflow.Ellipsis)
+        val visibleDate = selectedDate
+        val selectedState = history[visibleDate.toString()]
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            GritAnalyticsHeader("${visibleDate.monthValue}月${visibleDate.dayOfMonth}日", icon = R.drawable.grit_analytics) {
+                StatusPill(selectedState ?: "未安排", active = selectedState == "完成")
+            }
+            QuietSurface {
+                val selectedTasks = db.tasks(visibleDate.toString())
+                if (selectedTasks.isEmpty()) {
+                    Text("这一天还没有任务记录", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                } else selectedTasks.forEachIndexed { index, task ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.small)
+                            .clickable(enabled = !visibleDate.isAfter(today), onClick = { onHistoricalTask(task) })
+                            .semantics(mergeDescendants = true) {}
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        CompletionMark(task.done)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(task.title, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium), color = AppColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            val elapsedMs = db.elapsed(task)
+                            val elapsedStr = if (!task.elapsedKnown) "专注时长未知" else "实际\u00A0${formatDurationMs(elapsedMs)}"
+                            val targetStr = if (task.minutes > 0) "目标\u00A0${formatDurationMinutes(task.minutes)}" else ""
+                            val durationText = when {
+                                !task.elapsedKnown && task.minutes > 0 -> "专注时长未知 / 目标\u00A0${formatDurationMinutes(task.minutes)}"
+                                !task.elapsedKnown -> "专注时长未知"
+                                targetStr.isNotEmpty() -> "$elapsedStr / $targetStr"
+                                else -> elapsedStr
                             }
-                            Column(horizontalAlignment=Alignment.End,verticalArrangement=Arrangement.spacedBy(2.dp)) {
-                                Text(if (task.done) "完成" else "未完成", style = MaterialTheme.typography.labelSmall, color = if (task.done) AppColors.Accent else AppColors.Muted)
-                                if(!visibleDate.isAfter(today))TextButton(onClick={onHistoricalTask(task)},contentPadding=PaddingValues(0.dp)) { Text(if(task.done)"详情" else if(visibleDate.isBefore(today))"补记" else "查看",style=MaterialTheme.typography.labelSmall) }
+                            val completedAt = task.completedAt.takeIf { task.done && it > 0L }?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime() }
+                            val completionSuffix = if (task.done) {
+                                completedAt?.let { actual ->
+                                    val timeStr = actual.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+                                    if (actual.toLocalDate().toString() != task.date) " · 跨日补记完成于\u00A0${actual.monthValue}月${actual.dayOfMonth}日\u00A0$timeStr" else " · 完成于\u00A0$timeStr"
+                                } ?: " · 完成日期未记录"
+                            } else ""
+                            Text(durationText + completionSuffix, style = MaterialTheme.typography.labelSmall, color = AppColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(if (task.done) "完成" else "未完成", style = MaterialTheme.typography.labelSmall, color = if (task.done) AppColors.Accent else AppColors.Muted)
+                            Spacer(Modifier.height(4.dp))
+                            if (task.done) {
+                                Text("+100\u00A0XP", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 13.sp), color = AppColors.Accent)
+                            }
+                            if (!visibleDate.isAfter(today)) {
+                                Text(if (task.done) "详情" else if (visibleDate.isBefore(today)) "补记" else "查看", style = MaterialTheme.typography.labelSmall, color = AppColors.Text)
                             }
                         }
-                        if (index < selectedTasks.lastIndex) Hairline()
                     }
+                    if (index < selectedTasks.lastIndex) Hairline()
                 }
             }
         }
 
         AuditLogSection(db, refreshKey)
+
+        val dayCard = remember(visibleDate, refreshKey) { DailyCards.load(db, visibleDate.toString()) }
+        if (dayCard != null) {
+            QuietSurface(
+                modifier = Modifier.clickable { onOpenDailyCard(visibleDate.toString()) },
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.grit_flag),
+                            contentDescription = null,
+                            tint = AppColors.Reward,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("查看当日纪念", style = MaterialTheme.typography.titleSmall, color = AppColors.Text)
+                            Text("${visibleDate.monthValue}月${visibleDate.dayOfMonth}日 · 历史纪念卡", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
+                        }
+                    }
+                    Text("›", style = MaterialTheme.typography.titleMedium, color = AppColors.Muted)
+                }
+            }
+        }
     }
 }
 
@@ -270,19 +321,25 @@ private fun AuditLogSection(db: Database, refreshKey: Int) {
 }
 
 @Composable
-private fun TrendSection(db: Database, today: LocalDate) {
+private fun TrendSection(db: Database, today: LocalDate, refreshKey: Int, history: Map<String, String>, onDateSelected: (LocalDate) -> Unit) {
+    val weekState = rememberWeeklyReviewState(today)
+    val weeklyCompletions = remember(db, refreshKey, weekState.weekStart) {
+        completedTasksBetween(db, weekState.weekStart, weekState.weekEndExclusive)
+    }
+    var expanded by remember(weekState.weekStart) { mutableStateOf(false) }
+    val visibleCompletions = if (expanded || weeklyCompletions.size <= 5) weeklyCompletions else weeklyCompletions.take(5)
+
     val stats = (6 downTo 0).map { offset -> dailyStats(db, today.minusDays(offset.toLong())) }
     val total = stats.sumOf { it.total }
     val done = stats.sumOf { it.completed }
     val focusMinutes = stats.sumOf { it.focusMinutes }
-    val monthStats = taskStats(db, today.minusDays(29), today)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         GritAnalyticsHeader("近 7 天", icon = R.drawable.grit_analytics)
         QuietSurface {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("${percent(done, total)}%", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Light)
-                    Text("任务完成率 · $done / $total", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                    Text("计划完成率 · $done / $total", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
                 }
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(formatMinutes(focusMinutes), style = MaterialTheme.typography.titleLarge)
@@ -293,19 +350,60 @@ private fun TrendSection(db: Database, today: LocalDate) {
             else Text("最近 7 天还没有任务记录", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
         }
 
-        GritAnalyticsHeader("近 30 天", icon = R.drawable.grit_chart)
+        GritAnalyticsHeader("周回顾", icon = R.drawable.grit_analytics) {
+            StatusPill("${weeklyCompletions.size} 项", active = weeklyCompletions.isNotEmpty())
+        }
         QuietSurface {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("${percent(monthStats.completed, monthStats.total)}%", style = MaterialTheme.typography.headlineSmall)
-                    Text("任务完成率", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-                    Text("${monthStats.completed} / ${monthStats.total} 项", style = MaterialTheme.typography.labelSmall, color = AppColors.Quiet)
+            WeeklyReviewNavRow(weekState)
+            if (weeklyCompletions.isEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text("暂无完成记录", style = MaterialTheme.typography.bodyMedium, color = AppColors.Text)
+            } else {
+                Spacer(Modifier.height(4.dp))
+                visibleCompletions.forEachIndexed { index, completion ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        CompletionMark(true)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(completion.title, style = MaterialTheme.typography.bodyMedium, color = AppColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                weeklyCompletionDetail(completion, ZoneId.systemDefault()),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AppColors.Muted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    if (index < visibleCompletions.lastIndex) Hairline()
                 }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(formatMinutes(monthStats.focusMinutes), style = MaterialTheme.typography.titleLarge)
-                    Text("有效专注时长", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+
+                if (weeklyCompletions.size > 5) {
+                    Hairline()
+                    TextButton(
+                        onClick = { expanded = !expanded },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                    ) {
+                        Text(
+                            if (expanded) "收起" else "展开全部 ${weeklyCompletions.size} 项",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = AppColors.Accent,
+                        )
+                    }
                 }
             }
+        }
+
+        GritAnalyticsHeader("过去一年 · 计划日", icon = R.drawable.grit_heat)
+        GritWeeklyHeatMap(today, history, onDateSelected)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            CalendarLegend(AppColors.Accent, "完成")
+            CalendarLegend(AppColors.Border, "休息")
+            CalendarLegend(AppColors.Missed, "未完成")
+            CalendarLegend(MaterialTheme.colorScheme.surfaceContainerHigh, "无必做")
         }
     }
 }
@@ -370,6 +468,39 @@ private fun taskStats(db: Database, from: LocalDate, to: LocalDate): TaskStats =
         cursor.moveToFirst()
         TaskStats(cursor.getInt(1), cursor.getInt(0), cursor.getLong(2) / 60000)
     }
+
+internal fun completedTasksBetween(db: Database, start: LocalDate, endExclusive: LocalDate): List<WeeklyCompletion> {
+    val zone = ZoneId.systemDefault()
+    val from = start.atStartOfDay(zone).toInstant().toEpochMilli()
+    val until = endExclusive.atStartOfDay(zone).toInstant().toEpochMilli()
+    return db.readableDatabase.rawQuery(
+        "SELECT id,title,completed_at,elapsed FROM tasks WHERE done=1 AND completed_at>=? AND completed_at<? AND id NOT IN (SELECT source_id FROM task_moves) ORDER BY completed_at DESC,rowid DESC",
+        arrayOf(from.toString(), until.toString()),
+    ).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) {
+                add(WeeklyCompletion(
+                    title = cursor.getString(1),
+                    completedAt = cursor.getLong(2),
+                    elapsed = if (cursor.isNull(3)) 0L else cursor.getLong(3),
+                    elapsedKnown = !cursor.isNull(3),
+                ))
+            }
+        }
+    }
+}
+
+private fun weeklyCompletionDetail(completion: WeeklyCompletion, zone: ZoneId): String {
+    val completedAt = Instant.ofEpochMilli(completion.completedAt).atZone(zone)
+    val weekday = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")[completedAt.dayOfWeek.value - 1]
+    val time = completedAt.format(DateTimeFormatter.ofPattern("HH:mm"))
+    val focus = when {
+        !completion.elapsedKnown -> "专注时长未知"
+        completion.elapsed > 0L -> "专注 ${focusDuration(completion.elapsed)}"
+        else -> "未记录专注时长"
+    }
+    return "${completedAt.monthValue}/${completedAt.dayOfMonth} $weekday $time · $focus"
+}
 
 private fun percent(done: Int, total: Int) = if (total == 0) 0 else done * 100 / total
 

@@ -1,3 +1,42 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:pathData="M12,3L20,8V16L12,21L4,16V8Z M12,7L16,12L12,17L8,12Z" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round" android:strokeLineJoin="round" />
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 任务清单母形：五十项达成（双层叠放行动卡与多项完成，Lucide-aligned） -->
+    <!-- 后层卡片上缘与右缘 -->
+    <path
+        android:pathData="M8,2.5H19A2,2 0 0,1 21,4.5V16.5"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- 前层主卡片 -->
+    <path
+        android:pathData="M5,5.5H16A2,2 0 0,1 18,7.5V20A2,2 0 0,1 16,22H5A2,2 0 0,1 3,20V7.5A2,2 0 0,1 5,5.5Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- 勾选行 1 -->
+    <path
+        android:pathData="M6,10L7.5,11.5L10,9 M12,10.5H15"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- 勾选行 2 -->
+    <path
+        android:pathData="M6,14.5L7.5,16L10,13.5 M12,15H15"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- 勾选行 3 -->
+    <path
+        android:pathData="M6,19L7.5,20.5L10,18 M12,19.5H15"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
 </vector>

@@ -14,15 +14,18 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -52,14 +55,18 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import kotlinx.coroutines.launch
 
 internal data class Achievement(
@@ -110,14 +117,14 @@ internal fun achievementList(db: Database): List<Achievement> {
     }
     val streak = db.bestStreak()
     return listOf(
-        Achievement("task.first", "任务积累", "第一步", "完成第一项任务", completedDates.size.coerceAtMost(1), 1, taskDate(1)),
-        Achievement("task.ten", "任务积累", "十项有成", "累计完成 10 项任务", completedDates.size.coerceAtMost(10), 10, taskDate(10)),
-        Achievement("task.fifty", "任务积累", "积少成多", "累计完成 50 项任务", completedDates.size.coerceAtMost(50), 50, taskDate(50)),
-        Achievement("streak.three", "连续记录", "三日有恒", "连续三个自律日完成目标", streak.coerceAtMost(3), 3, streakDate(3)),
-        Achievement("streak.seven", "连续记录", "一周不辍", "连续七个自律日完成目标", streak.coerceAtMost(7), 7, streakDate(7)),
-        Achievement("streak.thirty", "连续记录", "一月有恒", "连续三十个自律日完成目标", streak.coerceAtMost(30), 30, streakDate(30)),
-        Achievement("focus.hour", "专注积累", "初次专注", "累计有效专注 60 分钟", focusMinutes.toInt().coerceAtMost(60), 60, focusDate(60)),
-        Achievement("focus.ten_hours", "专注积累", "积时成寸", "累计有效专注 10 小时", focusMinutes.toInt().coerceAtMost(600), 600, focusDate(600)),
+        Achievement("task.first", "任务积累", "首项达成", "完成第一项任务", completedDates.size.coerceAtMost(1), 1, taskDate(1)),
+        Achievement("task.ten", "任务积累", "十项达成", "累计完成 10 项任务", completedDates.size.coerceAtMost(10), 10, taskDate(10)),
+        Achievement("task.fifty", "任务积累", "五十项达成", "累计完成 50 项任务", completedDates.size.coerceAtMost(50), 50, taskDate(50)),
+        Achievement("streak.three", "连续记录", "连续三日", "连续三个自律日完成目标", streak.coerceAtMost(3), 3, streakDate(3)),
+        Achievement("streak.seven", "连续记录", "连续一周", "连续七个自律日完成目标", streak.coerceAtMost(7), 7, streakDate(7)),
+        Achievement("streak.thirty", "连续记录", "连续整月", "连续三十个自律日完成目标", streak.coerceAtMost(30), 30, streakDate(30)),
+        Achievement("focus.hour", "专注积累", "专注一小时", "累计有效专注 60 分钟", focusMinutes.toInt().coerceAtMost(60), 60, focusDate(60)),
+        Achievement("focus.ten_hours", "专注积累", "专注十小时", "累计有效专注 10 小时", focusMinutes.toInt().coerceAtMost(600), 600, focusDate(600)),
     )
 }
 
@@ -146,7 +153,7 @@ internal fun AchievementPreview(db: Database, refreshKey: Int, onAll: () -> Unit
         }
         visible.forEach { AchievementCard(it) { selected = it } }
     }
-    selected?.let { AchievementDetailDialog(it) { selected = null } }
+    selected?.let { AchievementDetailDialog(it, db) { selected = null } }
 }
 
 @Composable
@@ -163,9 +170,9 @@ internal fun AchievementsPage(db: Database, refreshKey: Int, onBack: () -> Unit)
         listOf("任务积累", "连续记录", "专注积累").forEach { category ->
             val group = items.filter { it.category == category }
             GritAnalyticsHeader(category, icon = when (category) {
-                "连续记录" -> R.drawable.grit_flag
-                "专注积累" -> R.drawable.grit_sprint
-                else -> R.drawable.grit_chart
+                "连续记录" -> R.drawable.category_streak
+                "专注积累" -> R.drawable.category_focus
+                else -> R.drawable.category_task
             })
             listOf("已获得" to group.filter { it.earned }, "进行中" to group.filter { it.started }, "未开始" to group.filter { !it.earned && !it.started })
                 .filter { it.second.isNotEmpty() }
@@ -175,7 +182,36 @@ internal fun AchievementsPage(db: Database, refreshKey: Int, onBack: () -> Unit)
                 }
         }
     }
-    selected?.let { AchievementDetailDialog(it) { selected = null } }
+    selected?.let { AchievementDetailDialog(it, db) { selected = null } }
+}
+
+@Composable
+internal fun AchievementProgressBar(
+    progress: Float,
+    started: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val clamped = progress.coerceIn(0f, 1f)
+    Box(
+        modifier
+            .height(5.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(3.dp))
+            .background(AppColors.Raised)
+            .semantics {
+                progressBarRangeInfo = ProgressBarRangeInfo(clamped, 0f..1f)
+            }
+    ) {
+        if (clamped > 0f) {
+            Box(
+                Modifier
+                    .fillMaxWidth(clamped)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(if (started) AppColors.Accent else AppColors.Border)
+            )
+        }
+    }
 }
 
 @Composable
@@ -195,19 +231,31 @@ private fun AchievementCard(item: Achievement, onClick: () -> Unit) {
                 }
                 Text(item.condition, style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
                 if (item.earned) Text("获得日期 · ${item.earnedDate ?: "记录已同步"}", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
-                else LinearProgressIndicator(
-                    progress = { (progress.toFloat() / item.target).coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = if (item.started) AppColors.Accent else AppColors.Border,
-                    trackColor = AppColors.Raised,
+                else AchievementProgressBar(
+                    progress = progress.toFloat() / item.target,
+                    started = item.started,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
             }
         }
     }
 }
 
+internal fun achievementDetailTitle(item: Achievement, evidence: AchievementEvidence): String =
+    if (evidence is AchievementEvidence.Hidden) "隐藏成就" else item.title
+
+internal fun achievementDetailNextStage(
+    item: Achievement,
+    evidence: AchievementEvidence,
+): Pair<String, String>? = if (evidence is AchievementEvidence.Hidden) null else nextStageOf(item.id)
+
 @Composable
-private fun AchievementMedal(item: Achievement, modifier: Modifier = Modifier, size: Dp = 66.dp) {
+private fun AchievementMedal(
+    item: Achievement,
+    modifier: Modifier = Modifier,
+    size: Dp = 66.dp,
+    accessibilityLabel: String = item.title,
+) {
     val resource = when (item.id) {
         "task.first" -> R.drawable.achievement_first
         "task.ten" -> R.drawable.achievement_ten
@@ -236,7 +284,7 @@ private fun AchievementMedal(item: Achievement, modifier: Modifier = Modifier, s
     ) {
         Box(contentAlignment = Alignment.Center) {
             androidx.compose.material3.Icon(
-                androidx.compose.ui.res.painterResource(resource), item.title,
+                androidx.compose.ui.res.painterResource(resource), accessibilityLabel,
                 Modifier.size(size * .60f), tint = tint,
             )
         }
@@ -244,23 +292,217 @@ private fun AchievementMedal(item: Achievement, modifier: Modifier = Modifier, s
 }
 
 @Composable
-private fun AchievementDetailDialog(item: Achievement, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { AchievementMedal(item, Modifier.size(104.dp)) },
-        title = { Text(item.title) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(item.condition, color = AppColors.Muted)
-                if (item.earned) Text("已获得 · ${item.earnedDate ?: "记录已同步"}", color = AppColors.Accent)
-                else {
-                    Text("当前进度 · ${item.progress} / ${item.target}", color = AppColors.Muted)
-                    LinearProgressIndicator(progress = { (item.progress.toFloat() / item.target).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth(), color = if (item.started) AppColors.Accent else AppColors.Border, trackColor = AppColors.Raised)
+internal fun AchievementDetailDialog(item: Achievement, db: Database, onDismiss: () -> Unit) {
+    val evidence = remember(item.id, item.earned, item.progress) {
+        loadAchievementEvidence(db, item)
+    }
+    val displayTitle = achievementDetailTitle(item, evidence)
+    val nextStage = remember(item.id, evidence is AchievementEvidence.Hidden) {
+        achievementDetailNextStage(item, evidence)
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = AppColors.Surface,
+            border = androidx.compose.foundation.BorderStroke(1.dp, AppColors.Border),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                // Top Header: Medal + Title + Category + Condition
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    AchievementMedal(item, Modifier.size(64.dp), accessibilityLabel = displayTitle)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(item.category, style = MaterialTheme.typography.labelMedium, color = AppColors.Muted)
+                        Text(
+                            text = displayTitle,
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                        Text(
+                            text = if (evidence is AchievementEvidence.Hidden) "达成前不显示条件" else item.condition,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = AppColors.Muted,
+                        )
+                    }
+                }
+
+                // Progress / Earned status
+                if (evidence !is AchievementEvidence.Hidden) {
+                    if (item.earned) {
+                        Text(
+                            text = "已达成 · ${item.earnedDate?.let { "解锁于 $it" } ?: "记录已同步"}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = AppColors.Accent,
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = "当前进度 · ${item.progress} / ${item.target}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = AppColors.Muted,
+                                )
+                                val remaining = (item.target - item.progress).coerceAtLeast(0)
+                                if (remaining > 0) {
+                                    Text(
+                                        text = "还需 $remaining",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = AppColors.Muted,
+                                    )
+                                }
+                            }
+                            AchievementProgressBar(
+                                progress = item.progress.toFloat() / item.target,
+                                started = item.started,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                    }
+
+                    // Next stage if defined
+                    nextStage?.let { (nextTitle, nextDesc) ->
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = AppColors.Raised,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("下一阶段", style = MaterialTheme.typography.labelSmall, color = AppColors.Accent)
+                                Text("$nextTitle · $nextDesc", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                            }
+                        }
+                    }
+                }
+
+                Hairline()
+
+                // Evidence List Section
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 240.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    when (evidence) {
+                        is AchievementEvidence.TaskList -> {
+                            Text(
+                                text = "贡献任务 (${evidence.tasks.size}/${item.target})",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = AppColors.Text,
+                            )
+                            if (evidence.tasks.isEmpty()) {
+                                Text("暂无完成任务记录", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                            } else {
+                                evidence.tasks.forEach { task ->
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.Top,
+                                    ) {
+                                        Text("✓", color = AppColors.Accent, style = MaterialTheme.typography.bodySmall)
+                                        Column(Modifier.weight(1f)) {
+                                            Text(task.title, style = MaterialTheme.typography.bodyMedium)
+                                            val timeDetail = if (task.completedAt > 0L) {
+                                                val dt = Instant.ofEpochMilli(task.completedAt).atZone(ZoneId.systemDefault()).toLocalDateTime()
+                                                val dateStr = String.format("%04d-%02d-%02d", dt.year, dt.monthValue, dt.dayOfMonth)
+                                                val timeStr = String.format("%02d:%02d", dt.hour, dt.minute)
+                                                val crossDay = if (dateStr != task.date) " · 实际完成 $dateStr $timeStr" else " · $timeStr"
+                                                "计划 ${task.date}$crossDay"
+                                            } else {
+                                                "计划 ${task.date} · 完成时间未记录"
+                                            }
+                                            val focusDetail = if (task.elapsedKnown && task.elapsed > 0) " · 专注 ${task.elapsed / 60000} 分钟" else ""
+                                            Text("$timeDetail$focusDetail", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        is AchievementEvidence.DateList -> {
+                            Text(
+                                text = "连续达标日 (${evidence.dates.size}/${item.target})",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = AppColors.Text,
+                            )
+                            if (evidence.dates.isEmpty()) {
+                                Text("暂无连续达标日期记录", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                            } else {
+                                evidence.dates.forEach { date ->
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text("●", color = AppColors.Warning, style = MaterialTheme.typography.bodySmall)
+                                        Text(date, style = MaterialTheme.typography.bodyMedium)
+                                        Text("自律日达标", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                                    }
+                                }
+                            }
+                        }
+                        is AchievementEvidence.FocusList -> {
+                            Text(
+                                text = "专注分布 (${evidence.entries.size} 天)",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = AppColors.Text,
+                            )
+                            if (evidence.entries.isEmpty()) {
+                                Text("暂无专注记录", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                            } else {
+                                evidence.entries.forEach { focus ->
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text("●", color = AppColors.Accent, style = MaterialTheme.typography.bodySmall)
+                                        Text(focus.date, style = MaterialTheme.typography.bodyMedium)
+                                        Text("有效专注 ${focus.minutes} 分钟", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                                    }
+                                }
+                            }
+                        }
+                        is AchievementEvidence.Hidden -> {
+                            Text("隐藏成就尚未解锁，达成后显示详情与支撑行动。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                        }
+                    }
+                }
+
+                Hairline()
+
+                // Bottom Action: Return to origin
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.semantics { contentDescription = "返回原处" },
+                    ) {
+                        Text("返回", color = AppColors.Text)
+                    }
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
-    )
+        }
+    }
 }
 
 @Composable

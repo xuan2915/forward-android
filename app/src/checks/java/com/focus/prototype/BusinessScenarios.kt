@@ -172,7 +172,7 @@ fun resign(root:org.json.JSONObject,payload:org.json.JSONObject):String { val bo
     val other="achievement-categories.db";context.deleteDatabase(other);var clock=LocalDateTime.parse("2026-11-06T12:00:00");val d=Database(context,other){clock}
     try {
      val date=d.day();d.addTask(date,"first real task",true,0,"行动型","",0,0,"once");d.confirm(date,false,0,0);d.complete(d.tasks().single())
-     val items=achievementList(d);val first=items.first{it.title=="第一步"};check(first.category=="任务积累"&&first.earned&&first.earnedDate==date)
+     val items=achievementList(d);val first=items.first{it.id=="task.first"};check(first.category=="任务积累"&&first.earned&&first.earnedDate==date)
      check(items.map{it.category}.toSet()==setOf("任务积累","连续记录","专注积累"));check(items.filter{!it.earned}.all{it.progress<it.target})
     } finally {d.close()}
    }

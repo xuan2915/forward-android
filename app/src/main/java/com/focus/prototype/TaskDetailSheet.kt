@@ -38,6 +38,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -219,7 +220,9 @@ fun TaskDetailSheet(
                     .animateContentSize(motionSizeSpec()),
                 verticalArrangement = Arrangement.spacedBy(AppSpace.Medium),
             ) {
-                TaskDetailBody(task, db, timer, startEditing, showHeader = true, onClose = { after -> close(after = after) }, onFocus = onFocus, onAnalytics = onAnalytics, onChanged = onChanged)
+                androidx.compose.runtime.CompositionLocalProvider(LocalContentColor provides AppColors.Text) {
+                    TaskDetailBody(task, db, timer, startEditing, showHeader = true, onClose = { after -> close(after = { onDismiss(); after() }) }, onFocus = onFocus, onAnalytics = onAnalytics, onChanged = onChanged)
+                }
             }
         }
     }
@@ -255,7 +258,7 @@ fun ColumnScope.TaskDetailBody(
             if (showHeader) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(if (!task.typeKnown) "任务类型待确认" else if (task.required) "必做任务" else "选做任务", style = MaterialTheme.typography.labelLarge, color = AppColors.Muted)
-                    Text(task.title, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold))
+                    Text(task.title, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold), color = AppColors.Text)
                 }
                 StatusPill(when {
                     task.done -> "已完成"
@@ -274,56 +277,79 @@ fun ColumnScope.TaskDetailBody(
                 }
             }
 
-            if(!task.done && task.date<db.day()) Text("历史任务 · 计划日 ${task.date} · 补记仍需满足原验收条件",style=MaterialTheme.typography.bodySmall,color=AppColors.Accent)
-            if(task.done&&task.completedAt>0L) {
-                val completedAt=java.time.Instant.ofEpochMilli(task.completedAt).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime()
-                val crossDay=completedAt.toLocalDate().toString()!=task.date
-                Text("${if(crossDay)"跨日补记" else "实际完成"} · ${completedAt.year}年${completedAt.monthValue}月${completedAt.dayOfMonth}日 ${completedAt.toLocalTime().toString().take(5)}",style=MaterialTheme.typography.bodySmall,color=if(crossDay)AppColors.Accent else AppColors.Muted)
+            if (!task.done && task.date < db.day()) Text("历史任务 · 计划日\u00A0${task.date} · 补记仍需满足原验收条件", style = MaterialTheme.typography.bodySmall, color = AppColors.Accent)
+
+            // 1. 完成时间
+            if (task.done) {
+                if (task.completedAt > 0L) {
+                    val completedAt = java.time.Instant.ofEpochMilli(task.completedAt).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime()
+                    val crossDay = completedAt.toLocalDate().toString() != task.date
+                    val timeStr = "${completedAt.year}年${completedAt.monthValue}月${completedAt.dayOfMonth}日\u00A0${completedAt.toLocalTime().toString().take(5)}"
+                    Text("${if(crossDay)"跨日补记 · " else ""}完成于\u00A0$timeStr", style = MaterialTheme.typography.bodySmall, color = if(crossDay) AppColors.Accent else AppColors.Muted)
+                } else {
+                    Text("完成于\u00A0${task.date}", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                }
             }
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(if (!task.elapsedKnown) "时长未知" else if (task.minutes > 0) "${focusDuration(elapsed)} / ${task.minutes} 分钟" else focusDuration(elapsed), style = MaterialTheme.typography.titleMedium)
-                    Text("专注记录", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
-                }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(completionMode, style = MaterialTheme.typography.titleMedium)
-                    Text("完成方式", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
-                }
+            // 2. 实际时长与目标时长放在同一区域
+            val actualDurationStr = if (!task.elapsedKnown) "专注时长未知" else "实际\u00A0${formatDurationMs(elapsed)}"
+            val targetDurationStr = if (task.minutes > 0) "目标\u00A0${formatDurationMinutes(task.minutes)}" else ""
+            val durationDisplay = if (targetDurationStr.isNotEmpty()) "$actualDurationStr / $targetDurationStr" else actualDurationStr
+            Text(durationDisplay, style = MaterialTheme.typography.titleMedium, color = AppColors.Text)
+
+            // 3. 完成方式独占完整一行
+            Text("完成方式：$completionMode", style = MaterialTheme.typography.bodyMedium, color = AppColors.Muted)
+
+            // 4. 实际获得的 XP
+            val contributesXp = task.done && db.readableDatabase.rawQuery("SELECT 1 FROM tasks WHERE id=? AND done=1 AND id NOT IN (SELECT source_id FROM task_moves)", arrayOf(task.id)).use { it.moveToFirst() }
+            if (contributesXp) {
+                Text("本项实际成长值：+100\u00A0XP", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = AppColors.Accent)
+            } else if (!task.done) {
+                Text("成长值：未获得（完成可得\u00A0+100\u00A0XP）", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
             }
+
+            // 5. 已到账娱乐奖励
+            if (task.done) {
+                if (task.required && (task.rewardMinutes > 0 || task.rewardGames > 0)) {
+                    val rewardList = buildList { if (task.rewardMinutes > 0) add("${task.rewardMinutes}\u00A0分钟"); if (task.rewardGames > 0) add("${task.rewardGames}\u00A0局") }.joinToString(" · ")
+                    Text("已到账娱乐奖励：$rewardList", style = MaterialTheme.typography.bodyMedium, color = AppColors.Text)
+                } else if (task.claimed) {
+                    val rewardList = buildList { if (task.rewardMinutes > 0) add("${task.rewardMinutes}\u00A0分钟"); if (task.rewardGames > 0) add("${task.rewardGames}\u00A0局") }.joinToString(" · ")
+                    Text("已到账娱乐奖励：$rewardList", style = MaterialTheme.typography.bodyMedium, color = AppColors.Text)
+                } else if (task.typeKnown && !task.required && (task.rewardMinutes > 0 || task.rewardGames > 0)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("领取一项娱乐奖励", style = MaterialTheme.typography.titleMedium, color = AppColors.Text)
+                        Text("每项选做奖励限领一次", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (task.rewardMinutes > 0) SecondaryAction("${task.rewardMinutes}\u00A0分钟", { db.claim(task, "video"); onChanged() }, enabled = db.rewardUnavailableReason(task.date) == null)
+                            if (task.rewardGames > 0) SecondaryAction("${task.rewardGames}\u00A0局", { db.claim(task, "game"); onChanged() }, enabled = db.rewardUnavailableReason(task.date) == null)
+                        }
+                        db.rewardUnavailableReason(task.date)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AppColors.Muted) }
+                    }
+                }
+            } else if (task.rewardMinutes > 0 || task.rewardGames > 0) {
+                val rewardList = buildList { if (task.rewardMinutes > 0) add("${task.rewardMinutes}\u00A0分钟"); if (task.rewardGames > 0) add("${task.rewardGames}\u00A0局") }.joinToString(" · ")
+                Text("${if (task.required) "完成可得娱乐奖励" else "完成可选领一项娱乐奖励"}：$rewardList", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+            }
+
             TextButton(onClick = { onClose(onAnalytics) }, modifier = Modifier.align(Alignment.End)) {
                 Text("查看成长统计")
             }
             if (task.checklist.isNotBlank()) {
                 QuietSurface(color = MaterialTheme.colorScheme.surfaceContainer) {
                     Text("完成标准", style = MaterialTheme.typography.labelLarge, color = AppColors.Muted)
-                    Text(task.checklist, style = MaterialTheme.typography.bodyLarge)
+                    Text(task.checklist, style = MaterialTheme.typography.bodyLarge, color = AppColors.Text)
                 }
             }
 
             if (task.done && (task.evidence.isNotBlank() || db.attachments(task).isNotEmpty())) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("历史完成证明", style = MaterialTheme.typography.titleMedium)
+                    Text("历史完成证明", style = MaterialTheme.typography.titleMedium, color = AppColors.Text)
                     ProofActions(task, db, onChanged)
                 }
             }
 
             if (task.done) {
-                if (task.required && (task.rewardMinutes>0 || task.rewardGames>0)) {
-                    Text("本项奖励已自动到账："+buildList{if(task.rewardMinutes>0)add("${task.rewardMinutes} 分钟");if(task.rewardGames>0)add("${task.rewardGames} 局")}.joinToString(" · "),style=MaterialTheme.typography.bodyMedium,color=AppColors.Muted)
-                } else if (task.typeKnown && !task.required && !task.claimed && (task.rewardMinutes > 0 || task.rewardGames > 0)) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("领取一项奖励", style = MaterialTheme.typography.titleMedium)
-                        Text("每项选做奖励限领一次", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (task.rewardMinutes > 0) SecondaryAction("${task.rewardMinutes} 分钟", { db.claim(task, "video"); onChanged() }, enabled = db.rewardUnavailableReason(task.date) == null)
-                            if (task.rewardGames > 0) SecondaryAction("${task.rewardGames} 局", { db.claim(task, "game"); onChanged() }, enabled = db.rewardUnavailableReason(task.date) == null)
-                        }
-                        db.rewardUnavailableReason(task.date)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AppColors.Muted) }
-                    }
-                } else if (task.claimed) {
-                    Text("奖励已领取", style = MaterialTheme.typography.bodyMedium, color = AppColors.Muted)
-                }
                 SecondaryAction("撤销误完成", { revoking = true }, Modifier.fillMaxWidth())
             } else {
                 PrimaryAction(
@@ -344,7 +370,7 @@ fun ColumnScope.TaskDetailBody(
                 if (elapsed > 0) SecondaryAction("重新计时", { resetting = true }, Modifier.fillMaxWidth())
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("完成证明", style = MaterialTheme.typography.titleMedium)
+                    Text("完成证明", style = MaterialTheme.typography.titleMedium, color = AppColors.Text)
                     Text(if(db.setting("proof_no_save_${task.id}")=="true") "仅提交证明 · 不在本机保存" else "照片和附件保存在本机，用于完成自检", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
                     ProofActions(task, db, onChanged)
                 }
@@ -359,13 +385,14 @@ fun ColumnScope.TaskDetailBody(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(Modifier.fillMaxWidth().toggleable(value = selfCheck, onValueChange = { selfCheck = it }), verticalAlignment = Alignment.CenterVertically) {
                             androidx.compose.material3.Checkbox(selfCheck, onCheckedChange = null)
-                            Text("我已按预设条件完成${if (task.mode == "掌握型") "独立练习或解释" else ""}")
+                            Text("我已按预设条件完成${if (task.mode == "掌握型") "独立练习或解释" else ""}", color = AppColors.Text)
                         }
                         Button(enabled = canComplete, onClick = {
                             db.complete(task)
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             checking = false
                             onChanged()
+                            onClose {}
                         }, modifier = Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(50)).immediatePress(canComplete)) { Text(if(task.date<db.day())"确认补记完成" else "确认完成任务") }
                         Text(
                             when {
@@ -379,7 +406,7 @@ fun ColumnScope.TaskDetailBody(
                     }
                 }
 
-                Text("计划调整", style = MaterialTheme.typography.titleMedium)
+                Text("计划调整", style = MaterialTheme.typography.titleMedium, color = AppColors.Text)
                 TaskChanges(task, db, onChanged, startEditing)
             }
 

@@ -181,7 +181,10 @@ internal class NightWrapUpAlarmReceiver : BroadcastReceiver() {
                 db.audit(cycle, "娱乐限制时段开始；只限制已选短视频和游戏应用")
                 NightWrapUpScheduler.post(context, (cycle.hashCode() xor 0x303), "娱乐限制已开始", "已选的短视频和游戏应用将暂时受限；学习窗口与紧急放行仍可用")
             }
-            NightStage.BEDTIME.name -> NightWrapUpScheduler.post(context, (cycle.hashCode() xor 0x404), "准备就寝", "夜间行为记录不代表真实睡眠监测")
+            NightStage.BEDTIME.name -> {
+                NightWrapUpScheduler.post(context, (cycle.hashCode() xor 0x404), "准备就寝", "收好手头的事，准备休息")
+                FocusService.showBedtimeReminder()
+            }
             NightStage.MORNING_RELEASE.name -> {
                 val count = db.nightViolations(cycle).size
                 val pendingMinutes = db.pendingNightPenalty("video", cycle) / 60_000L

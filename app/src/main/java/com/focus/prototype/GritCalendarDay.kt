@@ -51,12 +51,12 @@ fun GritCalendarDay(
         else -> MaterialTheme.colorScheme.surfaceContainer
     }
     Box(
-        Modifier.fillMaxWidth().height(40.dp).clickable { onSelected(day.date) },
+        Modifier.fillMaxWidth().height(40.dp),
         contentAlignment = Alignment.Center,
     ) {
         val circle = CircleShape
         Box(
-            Modifier.size(36.dp).clip(circle).background(color)
+            Modifier.size(36.dp).clip(circle).background(color).clickable { onSelected(day.date) }
                 .then(if (day.date == selected) Modifier.border(1.dp, MaterialTheme.colorScheme.primary, circle) else Modifier),
             contentAlignment = Alignment.Center,
         ) {

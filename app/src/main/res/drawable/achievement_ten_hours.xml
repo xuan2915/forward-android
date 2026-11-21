@@ -1,3 +1,38 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:pathData="M12,3C18,3 21,7 21,12C21,17 18,21 12,21C6,21 3,17 3,12C3,7 6,3 12,3Z M7,12C7,8 11,8 12,12C13,16 17,16 17,12C17,8 13,8 12,12C11,16 7,16 7,12Z" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round" android:strokeLineJoin="round" />
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 计时器母形：专注十小时（双环同心与四象限进阶刻度，Lucide-aligned） -->
+    <path
+        android:pathData="M12,1.5V4M10,1.5H14"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M12,4.5A8,8 0 1,0 12,20.5A8,8 0 1,0 12,4.5Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- 内层同心光环 -->
+    <path
+        android:pathData="M12,8.5A4,4 0 1,0 12,16.5A4,4 0 1,0 12,8.5Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- 4 象限刻度标记 -->
+    <path
+        android:pathData="M12,5V6.5 M12,18.5V20 M4.5,12.5H6 M18,12.5H19.5"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round" />
+    <!-- 沉浸时针与分针 -->
+    <path
+        android:pathData="M12,12.5L12,9.5 M12,12.5L15,13.5"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round" />
 </vector>
