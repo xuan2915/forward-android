@@ -5,19 +5,23 @@ import java.time.LocalDateTime
 enum class DailyGoalState { ACHIEVED, MISSED, REST, NO_REQUIRED_TASKS, UNPLANNED, IN_PROGRESS, FUTURE, UNKNOWN }
 
 fun requiredGoalAchieved(tasks: List<Task>, restDay: Boolean = false): Boolean {
- val required = tasks.filter { it.required }
- return !restDay && tasks.all { it.typeKnown } && required.isNotEmpty() && required.all { it.done }
+ val ordinary = tasks.filter { it.origin != "sleep_system" }
+ val required = ordinary.filter { it.required }
+ return !restDay && ordinary.all { it.typeKnown } && required.isNotEmpty() && required.all { it.done }
 }
 
-fun dailyGoalState(tasks: List<Task>, restDay: Boolean, date: String, today: String, requireKnownTypes: Boolean = true): DailyGoalState = when {
-  restDay -> DailyGoalState.REST
-  date > today -> DailyGoalState.FUTURE
-  tasks.isEmpty() -> DailyGoalState.UNPLANNED
-  requireKnownTypes && tasks.any { !it.typeKnown } -> DailyGoalState.UNKNOWN
-  tasks.none { it.required } -> DailyGoalState.NO_REQUIRED_TASKS
-  tasks.filter { it.required }.all { it.done } -> DailyGoalState.ACHIEVED
-  date < today -> DailyGoalState.MISSED
-  else -> DailyGoalState.IN_PROGRESS
+fun dailyGoalState(tasks: List<Task>, restDay: Boolean, date: String, today: String, requireKnownTypes: Boolean = true): DailyGoalState {
+  val ordinary = tasks.filter { it.origin != "sleep_system" }
+  return when {
+   restDay -> DailyGoalState.REST
+   date > today -> DailyGoalState.FUTURE
+   ordinary.isEmpty() -> DailyGoalState.UNPLANNED
+   requireKnownTypes && ordinary.any { !it.typeKnown } -> DailyGoalState.UNKNOWN
+   ordinary.none { it.required } -> DailyGoalState.NO_REQUIRED_TASKS
+   ordinary.filter { it.required }.all { it.done } -> DailyGoalState.ACHIEVED
+   date < today -> DailyGoalState.MISSED
+   else -> DailyGoalState.IN_PROGRESS
+  }
  }
 
 object Rules {

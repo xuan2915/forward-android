@@ -66,8 +66,8 @@ fun resign(root:org.json.JSONObject,payload:org.json.JSONObject):String { val bo
      val firstDay=d.day();d.addTask(firstDay,"before midnight",true,0,"行动型","",10,0,"once");d.confirm(firstDay,false,0,0);d.complete(d.tasks().single());check(d.balance("video")==600000L)
      clock=LocalDateTime.parse("2026-10-31T00:01:00");check(d.day()=="2026-10-31"&&d.rewardDay()=="2026-10-30");check(d.tasks().isEmpty());check(d.balance("video")==600000L)
      d.addTask(d.day(),"after midnight",true,0,"行动型","",5,0,"once");d.confirm(d.day(),false,0,0);d.complete(d.tasks().single());check(d.balance("video")==900000L)
-     clock=LocalDateTime.parse("2026-10-31T04:00:00");d.ensure();check(d.rewardDay()=="2026-10-31");check(d.balance("video")==0L)
-     d.addTask(d.day(),"after reset",false,0,"行动型","",7,0,"once");val afterReset=d.tasks().first{it.title=="after reset"};d.complete(afterReset);d.claim(afterReset,"video");check(d.balance("video")==420000L)
+     clock=LocalDateTime.parse("2026-10-31T04:00:00");d.ensure();check(d.rewardDay()=="2026-10-31");check(d.balance("video","2026-10-30")==0L);check(d.balance("video")==300000L)
+     d.addTask(d.day(),"after reset",false,0,"行动型","",7,0,"once");val afterReset=d.tasks().first{it.title=="after reset"};d.complete(afterReset);d.claim(afterReset,"video");check(d.balance("video")==720000L)
     } finally {d.close()}
    }
    test("historical task backfill keeps actual time and reconciles its reward once") {
@@ -154,7 +154,7 @@ fun resign(root:org.json.JSONObject,payload:org.json.JSONObject):String { val bo
    }
    test("manual sleep penalties wait for future rewards and corrections are idempotent") {
     val other="sleep-rules.db";context.deleteDatabase(other);val d=Database(context,other){now}
-    try {val date=d.day();val next=java.time.LocalDate.parse(date).plusDays(1).toString();d.addTask(date,"required",true,0,"行动型","",10,0,"once");d.addTask(next,"tomorrow one",true,0,"行动型","",10,0,"once");d.addTask(next,"tomorrow two",true,0,"行动型","",10,0,"once");d.confirm(date,false,0,0);d.complete(d.tasks().single());check(d.sleepTargets().take(2)==listOf("01:00","07:30"));d.recordSleep(date,"23:30","08:00");check(d.balance("video")==600000L&&d.pendingSleepPenalty()==900000L);d.recordSleep(date,"23:30","08:00");check(d.pendingSleepPenalty()==900000L);d.recordSleep(date,"01:30","08:00",reason="修正实际就寝时间");check(d.pendingSleepPenalty()==1800000L&&d.balance("video")==600000L);d.recordSleep(date,"01:30","08:00",excepted=true,reason="生病例外");check(d.balance("video")==600000L&&d.pendingSleepPenalty()==0L);check(d.sleepRecord(date)?.excepted==true)
+    try {val date=d.day();val next=java.time.LocalDate.parse(date).plusDays(1).toString();d.addTask(date,"required",true,0,"行动型","",10,0,"once");d.addTask(next,"tomorrow one",true,0,"行动型","",10,0,"once");d.addTask(next,"tomorrow two",true,0,"行动型","",10,0,"once");d.confirm(date,false,0,0);d.complete(d.tasks().single());check(d.sleepTargets().take(2)==listOf("00:30","07:30"));d.recordSleep(date,"23:30","08:00");check(d.balance("video")==600000L&&d.pendingSleepPenalty()==900000L);d.recordSleep(date,"23:30","08:00");check(d.pendingSleepPenalty()==900000L);d.recordSleep(date,"01:30","08:00",reason="修正实际就寝时间");check(d.pendingSleepPenalty()==1800000L&&d.balance("video")==600000L);d.recordSleep(date,"01:30","08:00",excepted=true,reason="生病例外");check(d.balance("video")==600000L&&d.pendingSleepPenalty()==0L);check(d.sleepRecord(date)?.excepted==true)
      d.recordSleep(date,"23:30","08:00",reason="恢复睡眠记录");now=now.plusDays(1);d.confirm(next,false,0,0);d.tasks(next).forEach{d.complete(it)};check(d.balance("video")==300000L);check(d.pendingSleepPenalty()==0L);check(d.rewardSnapshot("video").earned==1200000L);check(d.rewardSnapshot("video").sleepDeducted==900000L);check(d.rewardHistory().any{it.contains("睡眠规则抵扣 −15 分钟")})
     } finally {d.close()}
    }

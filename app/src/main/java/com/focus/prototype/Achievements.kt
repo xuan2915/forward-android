@@ -85,15 +85,15 @@ internal data class Achievement(
 internal fun achievementList(db: Database): List<Achievement> {
     val completedDates = mutableListOf<String>()
     db.readableDatabase.rawQuery(
-        "SELECT day FROM tasks WHERE done=1 AND id NOT IN (SELECT source_id FROM task_moves) ORDER BY day,rowid",
+        "SELECT day FROM tasks WHERE done=1 AND origin!='sleep_system' AND id NOT IN (SELECT source_id FROM task_moves) ORDER BY day,rowid",
         null,
     ).use { while (it.moveToNext()) completedDates.add(it.getString(0)) }
     val focusByDay = linkedMapOf<String, Long>()
     db.readableDatabase.rawQuery(
-        "SELECT day,COALESCE(SUM(elapsed),0) FROM tasks WHERE id NOT IN (SELECT source_id FROM task_moves) GROUP BY day ORDER BY day",
+        "SELECT day,COALESCE(SUM(elapsed),0) FROM tasks WHERE origin!='sleep_system' AND id NOT IN (SELECT source_id FROM task_moves) GROUP BY day ORDER BY day",
         null,
     ).use { while (it.moveToNext()) focusByDay[it.getString(0)] = it.getLong(1) }
-    db.runningTasks().forEach { task -> focusByDay[task.date] = (focusByDay[task.date] ?: 0) + (db.elapsed(task) - task.elapsed).coerceAtLeast(0) }
+    db.runningTasks().filter { it.origin != "sleep_system" }.forEach { task -> focusByDay[task.date] = (focusByDay[task.date] ?: 0) + (db.elapsed(task) - task.elapsed).coerceAtLeast(0) }
     val focusMinutes = focusByDay.values.sum() / 60000
     fun taskDate(target: Int) = completedDates.getOrNull(target - 1)
     fun focusDate(target: Int): String? {
@@ -149,7 +149,7 @@ internal fun AchievementPreview(db: Database, refreshKey: Int, onAll: () -> Unit
     QuietSurface {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("已获得 ${items.count { it.earned }} / ${items.size}", style = MaterialTheme.typography.labelMedium, color = AppColors.Muted, modifier = Modifier.weight(1f))
-            TextButton(onClick = onAll) { Text("查看全部成就") }
+            TextButton(onClick = onAll) { Text("查看全部成就 ›") }
         }
         visible.forEach { AchievementCard(it) { selected = it } }
     }
@@ -165,7 +165,7 @@ internal fun AchievementsPage(db: Database, refreshKey: Int, onBack: () -> Unit)
         verticalArrangement = Arrangement.spacedBy(AppSpace.Large),
     ) {
         TextButton(onClick = onBack) { Text("‹ 返回成长") }
-        PageHeading("真实记录 · 持续积累", "全部成就")
+        PageHeading("成长记录", "全部成就")
         Text("已获得 ${items.count { it.earned }} 项 · 共 ${items.size} 项", style = MaterialTheme.typography.bodyMedium, color = AppColors.Muted)
         listOf("任务积累", "连续记录", "专注积累").forEach { category ->
             val group = items.filter { it.category == category }
@@ -217,7 +217,7 @@ internal fun AchievementProgressBar(
 @Composable
 private fun AchievementCard(item: Achievement, onClick: () -> Unit) {
     val progress by animateIntAsState(item.progress, label = "achievement-progress-${item.id}")
-    val status = when { item.earned -> "已获得"; item.started -> "进行中 · $progress / ${item.target}"; else -> "未开始 · 0 / ${item.target}" }
+    val status = when { item.earned -> "已获得"; else -> "$progress / ${item.target}" }
     QuietSurface(
         Modifier.animateContentSize().clickable(onClick = onClick),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -229,7 +229,6 @@ private fun AchievementCard(item: Achievement, onClick: () -> Unit) {
                     Text(item.title, style = MaterialTheme.typography.titleSmall)
                     Text(status, style = MaterialTheme.typography.labelSmall, color = if (item.earned) AppColors.Accent else AppColors.Muted)
                 }
-                Text(item.condition, style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
                 if (item.earned) Text("获得日期 · ${item.earnedDate ?: "记录已同步"}", style = MaterialTheme.typography.labelSmall, color = AppColors.Muted)
                 else AchievementProgressBar(
                     progress = progress.toFloat() / item.target,
@@ -331,11 +330,13 @@ internal fun AchievementDetailDialog(item: Achievement, db: Database, onDismiss:
                             text = displayTitle,
                             style = MaterialTheme.typography.titleLarge,
                         )
-                        Text(
-                            text = if (evidence is AchievementEvidence.Hidden) "达成前不显示条件" else item.condition,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = AppColors.Muted,
-                        )
+                        if (evidence !is AchievementEvidence.Hidden) {
+                            Text(
+                                text = item.condition,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AppColors.Muted,
+                            )
+                        }
                     }
                 }
 
@@ -481,7 +482,6 @@ internal fun AchievementDetailDialog(item: Achievement, db: Database, onDismiss:
                             }
                         }
                         is AchievementEvidence.Hidden -> {
-                            Text("隐藏成就尚未解锁，达成后显示详情与支撑行动。", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
                         }
                     }
                 }

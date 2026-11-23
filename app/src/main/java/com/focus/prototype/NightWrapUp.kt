@@ -31,6 +31,11 @@ import android.Manifest
 import android.content.pm.PackageManager
 import java.time.LocalDateTime
 import java.time.LocalTime
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import java.time.LocalDate
 
 @Composable
 internal fun NightWrapUpCard(db: Database, refreshKey: Int, onChanged: () -> Unit) {
@@ -50,19 +55,13 @@ internal fun NightWrapUpCard(db: Database, refreshKey: Int, onChanged: () -> Uni
     LaunchedEffect(Unit) { NightWrapUpScheduler.reschedule(context, db) }
 
     QuietSurface {
-        Text("夜间收尾", style = MaterialTheme.typography.titleLarge)
-        Text("按计划提醒与限制娱乐应用，不判断真实睡眠", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-    }
-
-    QuietSurface {
         Text("夜间时间", style = MaterialTheme.typography.titleMedium)
         NightTimeRow("开始收尾", config.windDown) { config = config.copy(windDown = it); message = "" }
         NightTimeRow("停止新工作", config.workCutoff) { config = config.copy(workCutoff = it); message = "" }
         NightTimeRow("娱乐截止", config.entertainmentCutoff) { config = config.copy(entertainmentCutoff = it); message = "" }
         NightTimeRow("准备就寝", config.bedtime) { config = config.copy(bedtime = it); message = "" }
         NightTimeRow("早晨解除限制", config.morningRelease) { config = config.copy(morningRelease = it); message = "" }
-        Text("工作截止时可结束，或延长一次 30 分钟。到时只提醒，不会结束计时或关闭后台应用", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-        Text("00:00 任务日期切换与 04:00 娱乐额度重置保持独立", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+        Text("截止时提醒；可结束或延长一次 30 分钟", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
         val validationError = runCatching { config.validate() }.exceptionOrNull()?.message
         if (validationError != null && message.isBlank()) {
             Text(validationError, style = MaterialTheme.typography.bodySmall, color = AppColors.Warning)
@@ -83,9 +82,7 @@ internal fun NightWrapUpCard(db: Database, refreshKey: Int, onChanged: () -> Uni
 
     QuietSurface {
         Text("娱乐限制", style = MaterialTheme.typography.titleMedium)
-        Text("截止后拦截已选的抖音、B 站和游戏应用", style = MaterialTheme.typography.bodyMedium)
-        Text("B 站学习窗口、紧急放行仍有效；通讯和学习工具不纳入夜间拦截", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-        Text("有明确拦截记录才抵扣后续额度，已使用奖励不追回", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+        Text("截止后拦截受限应用", style = MaterialTheme.typography.bodyMedium)
         Text("娱乐抵扣上限", style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf(0, 5, 10, 15, 20).forEach { cap ->
@@ -98,7 +95,6 @@ internal fun NightWrapUpCard(db: Database, refreshKey: Int, onChanged: () -> Uni
                 FilterChip(selected = config.penaltyCapGames == cap, onClick = { config = config.copy(penaltyCapGames = cap) }, label = { Text("$cap 局") })
             }
         }
-        Text("实际抵扣会在后续奖励记录中列出；权限中断或没有拦截证据时不处罚", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
     }
 
     QuietSurface {
@@ -106,7 +102,6 @@ internal fun NightWrapUpCard(db: Database, refreshKey: Int, onChanged: () -> Uni
         Text("通知 · ${if (notificationGranted) "已开启" else "未授权"}", color = if (notificationGranted) AppColors.Accent else AppColors.Warning)
         Text("精确提醒 · ${if (exactGranted) "已授权" else "未授权，将使用近似提醒"}", color = if (exactGranted) AppColors.Accent else AppColors.Warning)
         Text("应用保护 · ${if (FocusService.connected && focusServiceEnabled) "服务已连接" else if (focusServiceEnabled) "系统已启用，当前未连接" else "无障碍服务未启用"}", color = if (FocusService.connected && focusServiceEnabled) AppColors.Accent else AppColors.Warning)
-        Text("ColorOS 可能限制后台唤醒；服务中断时不会补记为违规", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = {
                 when {
@@ -137,7 +132,6 @@ internal fun NightWrapUpCard(db: Database, refreshKey: Int, onChanged: () -> Uni
         Text(completedCycle, style = MaterialTheme.typography.labelMedium, color = AppColors.Muted)
         Text(if (recorded.isEmpty()) "没有已记录的娱乐拦截" else "娱乐拦截 $videoEvents 次 · 游戏拦截 $gameEvents 次", style = MaterialTheme.typography.bodyLarge)
         if (pendingMinutes > 0 || pendingGames > 0) Text("后续奖励待抵扣 $pendingMinutes 分钟 · $pendingGames 局", color = AppColors.Warning)
-        Text("这只是夜间行为记录，不是睡眠时间或入睡证明", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
     }
 }
 

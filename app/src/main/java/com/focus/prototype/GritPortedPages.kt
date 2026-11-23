@@ -151,6 +151,8 @@ internal fun GritTaskListPage(
     onDetailMode: (String) -> Unit = {},
     expandedTaskId: String? = null,
     inlineDetail: (@Composable ColumnScope.(Task) -> Unit)? = null,
+    onSleepRecord: (String) -> Unit = {},
+    refreshKey: Int = 0,
 ) {
     val listState = rememberLazyListState()
     val density = LocalDensity.current
@@ -217,6 +219,51 @@ internal fun GritTaskListPage(
                 contentPadding = PaddingValues(top = 16.dp, bottom = 88.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
+                val yesterday = runCatching { java.time.LocalDate.parse(date).minusDays(1).toString() }.getOrNull()
+                val yesterdayStatus = if (yesterday != null) db.sleepStatus(yesterday) else SleepStatus.PASS
+                val yesterdayOverdue = if (yesterday != null) db.isSleepUnverifiedOverdue(yesterday) else false
+                val yesterdayReminded = if (yesterday != null) db.hasSleepBeenReminded(yesterday) else true
+                if (yesterday != null && yesterdayStatus == SleepStatus.UNVERIFIED && yesterdayOverdue && !yesterdayReminded) {
+                    item(key = "sleep-unverified-reminder") {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        "昨日睡眠待核验提醒（超24小时）",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = AppColors.Warning
+                                    )
+                                    Text(
+                                        "记录缺失不增加违规等级，逾期不自动判罚失败",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = AppColors.Muted
+                                    )
+                                }
+                                Row {
+                                    TextButton(onClick = {
+                                        db.markSleepReminded(yesterday)
+                                        onSleepRecord(yesterday)
+                                    }) {
+                                        Text("去核验")
+                                    }
+                                    TextButton(onClick = {
+                                        db.markSleepReminded(yesterday)
+                                    }) {
+                                        Text("知道了")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 if (continuing.isNotEmpty()) {
                     item {
                         Text(

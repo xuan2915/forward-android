@@ -12,9 +12,27 @@ import java.time.Instant
 import java.time.ZoneId
 import java.util.UUID
 
-data class Task(val id: String, val date: String, val title: String, val required: Boolean, val minutes: Int, val mode: String, val checklist: String, val rewardMinutes: Int, val rewardGames: Int, val elapsed: Long, val runningSince: Long, val bootTime: Long, val evidence: String, val done: Boolean, val claimed: Boolean, val completedAt: Long = 0L, val typeKnown: Boolean = true, val elapsedKnown: Boolean = true, val historySource: String = "", val historyConfidence: String = "")
+data class Task(val id: String, val date: String, val title: String, val required: Boolean, val minutes: Int, val mode: String, val checklist: String, val rewardMinutes: Int, val rewardGames: Int, val elapsed: Long, val runningSince: Long, val bootTime: Long, val evidence: String, val done: Boolean, val claimed: Boolean, val completedAt: Long = 0L, val typeKnown: Boolean = true, val elapsedKnown: Boolean = true, val historySource: String = "", val historyConfidence: String = "", val origin: String = "")
 data class Contract(val date: String, val confirmed: Boolean, val rest: Boolean, val baseMinutes: Int, val baseGames: Int, val baseClaimed: Boolean, val emergency: Boolean)
-data class SleepRecord(val date:String,val bedtime:String,val wakeTime:String,val bedtimePenalty:Long,val wakePenalty:Long,val excepted:Boolean,val reason:String,val source:String="manual")
+enum class SleepStatus { PASS, FAIL, PAUSED, UNVERIFIED }
+data class SleepRecord(
+ val date:String,
+ val bedtime:String,
+ val wakeTime:String,
+ val bedtimePenalty:Long,
+ val wakePenalty:Long,
+ val excepted:Boolean,
+ val reason:String,
+ val source:String="manual",
+ val status:SleepStatus=if(excepted) SleepStatus.PAUSED else if(bedtimePenalty==0L&&wakePenalty==0L) SleepStatus.PASS else SleepStatus.FAIL,
+ val version:Int=1,
+ val prepareBedtime:String?=null,
+ val durationMinutes:Long=0L,
+ val effectiveDate:String=date,
+ val level:Int=0,
+ val penaltyMinutes:Int=0,
+ val penaltyGames:Int=0
+)
 data class RewardSnapshot(val earned:Long,val used:Long,val sleepDeducted:Long,val expired:Long,val reversed:Long,val remaining:Long,val nightDeducted:Long=0L)
 data class GrowthPeriodStats(val planDays:Int,val achievedDays:Int,val weekPlanDays:Int,val weekAchievedDays:Int,val focusMillis:Long)
 
@@ -22,7 +40,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
  override fun onCreate(db: SQLiteDatabase) {
   db.execSQL("CREATE TABLE contracts(day TEXT PRIMARY KEY, confirmed INTEGER NOT NULL DEFAULT 0, rest INTEGER NOT NULL DEFAULT 0, base_minutes INTEGER NOT NULL DEFAULT 30, base_games INTEGER NOT NULL DEFAULT 0, base_claimed INTEGER NOT NULL DEFAULT 0, emergency INTEGER NOT NULL DEFAULT 0, boundary INTEGER NOT NULL DEFAULT 4)")
   db.execSQL("CREATE TABLE tasks(id TEXT PRIMARY KEY, day TEXT NOT NULL, title TEXT NOT NULL, required INTEGER NOT NULL, minutes INTEGER NOT NULL, mode TEXT NOT NULL, checklist TEXT NOT NULL, reward_minutes INTEGER NOT NULL, reward_games INTEGER NOT NULL, elapsed INTEGER NOT NULL DEFAULT 0, running_since INTEGER NOT NULL DEFAULT 0, boot_time INTEGER NOT NULL DEFAULT 0, evidence TEXT NOT NULL DEFAULT '', done INTEGER NOT NULL DEFAULT 0, claimed INTEGER NOT NULL DEFAULT 0, recurrence TEXT NOT NULL DEFAULT 'once', origin TEXT NOT NULL DEFAULT '', completed_at INTEGER NOT NULL DEFAULT 0)")
-  db.execSQL("CREATE TABLE ledger(id TEXT PRIMARY KEY, day TEXT NOT NULL, task_id TEXT NOT NULL, kind TEXT NOT NULL, amount INTEGER NOT NULL, created INTEGER NOT NULL)")
+  db.execSQL("CREATE TABLE ledger(id TEXT PRIMARY KEY, day TEXT NOT NULL, task_id TEXT NOT NULL, kind TEXT NOT NULL, amount INTEGER NOT NULL, created INTEGER NOT NULL, task_day TEXT, expire_at INTEGER NOT NULL DEFAULT 0, consumption_day TEXT)")
   db.execSQL("CREATE TABLE reviews(day TEXT PRIMARY KEY, problem TEXT NOT NULL, praise TEXT NOT NULL, note TEXT NOT NULL)")
   db.execSQL("CREATE TABLE audit(id TEXT PRIMARY KEY, day TEXT NOT NULL, detail TEXT NOT NULL, created INTEGER NOT NULL)")
   db.execSQL("CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
@@ -31,6 +49,11 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   upgradeTemplates(db)
   upgradeAttachments(db)
   upgradeHistory(db)
+  upgradeLedger(db)
+ }
+ override fun onOpen(db: SQLiteDatabase) {
+  super.onOpen(db)
+  upgradeLedger(db)
  }
  override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
   if(oldVersion<2) upgradeTemplates(db)
@@ -50,6 +73,15 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    legacyReserved.forEach { (cycle,value) -> db.update("settings",cv("key" to "night_reserved_video_$cycle","value" to value),"key=?",arrayOf("night_reserved_$cycle")) }
   }
   if(oldVersion<8) upgradeHistory(db)
+  upgradeLedger(db)
+ }
+ private fun upgradeLedger(db: SQLiteDatabase) {
+  val existing = mutableSetOf<String>()
+  db.rawQuery("PRAGMA table_info(ledger)", null).use { while(it.moveToNext()) existing.add(it.getString(1)) }
+  if ("task_day" !in existing) db.execSQL("ALTER TABLE ledger ADD COLUMN task_day TEXT")
+  if ("expire_at" !in existing) db.execSQL("ALTER TABLE ledger ADD COLUMN expire_at INTEGER NOT NULL DEFAULT 0")
+  if ("consumption_day" !in existing) db.execSQL("ALTER TABLE ledger ADD COLUMN consumption_day TEXT")
+  db.execSQL("UPDATE ledger SET task_day=day WHERE task_day IS NULL")
  }
  private fun upgradeHistory(db: SQLiteDatabase) {
   val existing = mutableSetOf<String>()
@@ -100,7 +132,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
  private fun Cursor.i(name: String) = getInt(getColumnIndexOrThrow(name))
  private fun Cursor.l(name: String) = getLong(getColumnIndexOrThrow(name))
  private fun Cursor.b(name: String) = i(name) != 0
- private fun Cursor.task() = Task(s("id"),s("day"),s("title"),b("required"),i("minutes"),s("mode"),s("checklist"),i("reward_minutes"),i("reward_games"),l("elapsed"),l("running_since"),l("boot_time"),s("evidence"),b("done"),b("claimed"),l("completed_at"),b("type_known"),!isNull(getColumnIndexOrThrow("elapsed")),s("history_source"),s("history_confidence"))
+ private fun Cursor.task() = Task(s("id"),s("day"),s("title"),b("required"),i("minutes"),s("mode"),s("checklist"),i("reward_minutes"),i("reward_games"),l("elapsed"),l("running_since"),l("boot_time"),s("evidence"),b("done"),b("claimed"),l("completed_at"),b("type_known"),!isNull(getColumnIndexOrThrow("elapsed")),s("history_source"),s("history_confidence"),runCatching{s("origin")}.getOrDefault(""))
  fun confirmHistoricalType(task:Task,required:Boolean) { require(!task.typeKnown); writableDatabase.update("tasks",cv("required" to required,"type_known" to true),"id=? AND type_known=0",arrayOf(task.id)) }
  fun setting(key: String, default: String = ""): String = readableDatabase.rawQuery("SELECT value FROM settings WHERE key=?", arrayOf(key)).use { if (it.moveToFirst()) it.getString(0) else default }
  fun setSetting(key: String, value: String) { writableDatabase.insertWithOnConflict("settings", null, cv("key" to key,"value" to value), SQLiteDatabase.CONFLICT_REPLACE) }
@@ -129,10 +161,12 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    setSetting("generated_through",day)
   }
   val rewardDate=rewardDay()
-  if(day==day() && setting("expiry_checked")!=rewardDate) {
-   allocateLegacySpending(db,rewardDate,"video");allocateLegacySpending(db,rewardDate,"game")
-   db.beginTransaction()
-   try { val expired=mutableListOf<Triple<String,String,Long>>(); db.rawQuery("SELECT day,kind,SUM(amount) FROM ledger WHERE day<? GROUP BY day,kind HAVING SUM(amount)>0",arrayOf(rewardDate)).use { c->while(c.moveToNext()) expired.add(Triple(c.getString(0),c.getString(1),c.getLong(2))) };expired.forEach { (date,kind,amount)->val created=System.currentTimeMillis();ledgerAt(db,date,"expiry",kind,-amount,created);allocateSpend(db,date,kind,amount,created);audit(date,"未使用奖励过期：$kind / $amount") };setSetting("expiry_checked",rewardDate);db.setTransactionSuccessful() } finally {db.endTransaction()}
+  if(day==day()) {
+   settleExpiredBatches(now())
+   setSetting("expiry_checked",rewardDate)
+  }
+  if (setting("sleep_system_tasks_enabled") == "true") {
+   ensureSleepSystemTasks(day)
   }
   val confirmed = db.rawQuery("SELECT confirmed FROM contracts WHERE day=?", arrayOf(day)).use { if(it.moveToFirst()) it.getInt(0) != 0 else null }
   if (confirmed == true || confirmed != null && day < day()) { issueCompletedRequiredRewards(db,day); return }
@@ -196,32 +230,135 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   !contract(date).confirmed -> "请先在设置的今日计划中确认计划"
   else -> null
  }
- private fun ledger(db: SQLiteDatabase, day: String, task: String, kind: String, amount: Long) = ledgerAt(db,day,task,kind,amount,System.currentTimeMillis())
- private fun ledgerAt(db: SQLiteDatabase, day: String, task: String, kind: String, amount: Long,created:Long) { db.insertOrThrow("ledger", null, cv("id" to UUID.randomUUID().toString(),"day" to day,"task_id" to task,"kind" to kind,"amount" to amount,"created" to created)) }
+ fun batchExpiryMillis(taskDate: String): Long {
+  val boundary = setting("boundary", "4").toIntOrNull()?.coerceIn(0, 23) ?: 4
+  val expiryDateTime = LocalDate.parse(taskDate).plusDays(1).atTime(boundary, 0)
+  return expiryDateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+ }
+ fun isBatchExpired(taskDate: String, at: LocalDateTime = now()): Boolean {
+  val boundary = setting("boundary", "4").toIntOrNull()?.coerceIn(0, 23) ?: 4
+  val expiryDateTime = runCatching { LocalDate.parse(taskDate).plusDays(1).atTime(boundary, 0) }.getOrNull() ?: return false
+  return at >= expiryDateTime
+ }
+ fun dailyEarnCap(kind: String): Long = setting("reward_daily_earn_cap_$kind").toLongOrNull() ?: Long.MAX_VALUE
+ fun setDailyEarnCap(kind: String, cap: Long) { setSetting("reward_daily_earn_cap_$kind", cap.toString()) }
+ fun dailyUsageCap(kind: String): Long = setting("reward_daily_use_cap_$kind").toLongOrNull() ?: Long.MAX_VALUE
+ fun setDailyUsageCap(kind: String, cap: Long) { setSetting("reward_daily_use_cap_$kind", cap.toString()) }
+ fun consumedOnDate(db: SQLiteDatabase = readableDatabase, date: String, kind: String): Long = db.rawQuery(
+  "SELECT COALESCE(-SUM(amount), 0) FROM ledger WHERE kind=? AND task_id='usage' AND (consumption_day=? OR (consumption_day IS NULL AND day=?))",
+  arrayOf(kind, date, date)
+ ).use { if (it.moveToFirst()) it.getLong(0) else 0L }
+ fun activeBatchesSortedByExpiry(db: SQLiteDatabase = readableDatabase, kind: String): List<String> {
+  val batches = mutableListOf<String>()
+  db.rawQuery("SELECT day, SUM(amount) FROM ledger WHERE kind=? GROUP BY day HAVING SUM(amount)>0", arrayOf(kind)).use { c ->
+   while (c.moveToNext()) batches.add(c.getString(0))
+  }
+  val nowTime = now()
+  return batches.filter { !isBatchExpired(it, nowTime) }.sorted()
+ }
+ fun settleExpiredBatches(at: LocalDateTime = now()) {
+  val db = writableDatabase
+  val atMillis = at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+  val boundary = setting("boundary", "4").toIntOrNull()?.coerceIn(0, 23) ?: 4
+  val batchesWithBalance = mutableListOf<Triple<String, String, Long>>()
+  db.rawQuery("SELECT day, kind, SUM(amount) FROM ledger GROUP BY day, kind HAVING SUM(amount)>0", null).use { c ->
+   while (c.moveToNext()) batchesWithBalance.add(Triple(c.getString(0), c.getString(1), c.getLong(2)))
+  }
+  for ((batchDate, kind, remaining) in batchesWithBalance) {
+   val expiryTime = runCatching {
+    LocalDate.parse(batchDate).plusDays(1).atTime(boundary, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+   }.getOrNull() ?: 0L
+   if (atMillis >= expiryTime) {
+    allocateLegacySpending(db, batchDate, kind)
+    ledgerAt(db, batchDate, "expiry", kind, -remaining, atMillis, batchDate, expiryTime, null)
+    allocateSpend(db, batchDate, kind, remaining, atMillis)
+    audit(batchDate, "未使用奖励过期：$kind / $remaining")
+   }
+  }
+ }
+ private fun ledger(db: SQLiteDatabase, day: String, task: String, kind: String, amount: Long, taskDay: String? = null, expireAt: Long = 0L, consumptionDay: String? = null) =
+  ledgerAt(db, day, task, kind, amount, System.currentTimeMillis(), taskDay, expireAt, consumptionDay)
+ private fun ledgerAt(db: SQLiteDatabase, day: String, task: String, kind: String, amount: Long, created: Long, taskDay: String? = null, expireAt: Long = 0L, consumptionDay: String? = null) {
+  db.insertOrThrow("ledger", null, cv("id" to UUID.randomUUID().toString(), "day" to day, "task_id" to task, "kind" to kind, "amount" to amount, "created" to created, "task_day" to (taskDay ?: day), "expire_at" to expireAt, "consumption_day" to consumptionDay))
+ }
  private fun allocationKind(kind:String)="${kind}_allocation"
  private fun pendingSleepKey(date:String,source:String)="sleep_pending_${date}_$source"
  private fun grantReward(db:SQLiteDatabase,date:String,source:String,kind:String,amount:Long) {
-  if(amount<=0)return
-  ledger(db,date,source,kind,amount)
+  if(amount<=0) return
+  if(isBatchExpired(date, now())) {
+   audit(date, "任务已完成但奖励批次已过期，仅记录完成与XP，不发放娱乐额度：$kind / $amount")
+   return
+  }
+  val expireAt = batchExpiryMillis(date)
+  ledger(db, date, source, kind, amount, taskDay = date, expireAt = expireAt)
   var available=amount
   if(kind=="video") {
    val pending=mutableListOf<Triple<String,String,Long>>()
-   db.rawQuery("SELECT key,value FROM settings WHERE key GLOB 'sleep_pending_*' AND CAST(value AS INTEGER)>0",null).use { c ->
+   db.rawQuery("SELECT key,value FROM settings WHERE key GLOB 'sleep_pending_*' AND key NOT GLOB 'sleep_pending_video_*' AND key NOT GLOB 'sleep_pending_game_*' AND CAST(value AS INTEGER)>0",null).use { c ->
     while(c.moveToNext()) {
      val key=c.getString(0);val parts=key.removePrefix("sleep_pending_").split('_')
      if(parts.size>=2)pending.add(Triple(parts.dropLast(1).joinToString("_"),parts.last(),c.getString(1).toLong()))
     }
    }
+   db.rawQuery("SELECT key,value FROM settings WHERE key GLOB 'sleep_pending_video_*' AND CAST(value AS INTEGER)>0",null).use { c ->
+    while(c.moveToNext()) {
+     val key=c.getString(0);val parts=key.removePrefix("sleep_pending_video_").split('_')
+     if(parts.size>=2) {
+      val effectiveDate = parts[0]
+      val cycleDate = parts[1]
+      if(date >= effectiveDate) {
+       pending.add(Triple(effectiveDate, "video:$cycleDate", c.getString(1).toLong()))
+      }
+     }
+    }
+   }
    pending.sortedWith(compareBy<Triple<String,String,Long>>{it.first}.thenBy{it.second}).forEach { (sleepDate,sourceType,amountDue) ->
     if(available<=0)return@forEach
     val charged=minOf(available,amountDue);val at=System.currentTimeMillis()
-    appendDebit(db,date,"sleep:$sourceType:$sleepDate",kind,charged,at)
+    val taskId = if(sourceType.startsWith("video:")) "sleep:cycle:${sourceType.removePrefix("video:")}" else "sleep:$sourceType:$sleepDate"
+    appendDebit(db,date,taskId,kind,charged,at)
     appendDebit(db,date,source,allocationKind(kind),charged,at)
-    setSetting(pendingSleepKey(sleepDate,sourceType),(amountDue-charged).toString())
+    val settingKey = if(sourceType.startsWith("video:")) "sleep_pending_video_${sleepDate}_${sourceType.removePrefix("video:")}" else pendingSleepKey(sleepDate,sourceType)
+    setSetting(settingKey,(amountDue-charged).toString())
+    available-=charged
+   }
+  } else if(kind=="game") {
+   val pending=mutableListOf<Triple<String,String,Long>>()
+   db.rawQuery("SELECT key,value FROM settings WHERE key GLOB 'sleep_pending_game_*' AND CAST(value AS INTEGER)>0",null).use { c ->
+    while(c.moveToNext()) {
+     val key=c.getString(0);val parts=key.removePrefix("sleep_pending_game_").split('_')
+     if(parts.size>=2) {
+      val effectiveDate = parts[0]
+      val cycleDate = parts[1]
+      if(date >= effectiveDate) {
+       pending.add(Triple(effectiveDate, "game:$cycleDate", c.getString(1).toLong()))
+      }
+     }
+    }
+   }
+   pending.sortedWith(compareBy<Triple<String,String,Long>>{it.first}.thenBy{it.second}).forEach { (sleepDate,sourceType,amountDue) ->
+    if(available<=0)return@forEach
+    val charged=minOf(available,amountDue);val at=System.currentTimeMillis()
+    val taskId = if(sourceType.startsWith("game:")) "sleep:cycle:${sourceType.removePrefix("game:")}" else "sleep:$sourceType:$sleepDate"
+    appendDebit(db,date,taskId,kind,charged,at)
+    appendDebit(db,date,source,allocationKind(kind),charged,at)
+    val settingKey = "sleep_pending_game_${sleepDate}_${sourceType.removePrefix("game:")}"
+    setSetting(settingKey,(amountDue-charged).toString())
     available-=charged
    }
   }
   applyPendingNightPenalty(db,date,source,kind,available)
+  val earnCap = dailyEarnCap(kind)
+  if(earnCap < Long.MAX_VALUE) {
+   val netSoFar = db.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND kind=? AND task_id NOT IN ('usage','expiry')", arrayOf(date, kind)).use { it.moveToFirst(); it.getLong(0) }
+   if(netSoFar > earnCap) {
+    val excess = netSoFar - earnCap
+    val at = System.currentTimeMillis()
+    appendDebit(db, date, "cap:daily_limit", kind, excess, at)
+    allocateSpend(db, date, kind, excess, at)
+    audit(date, "超出每日获取上限，扣减 $kind 额度：$excess")
+   }
+  }
  }
  private fun applyPendingNightPenalty(db:SQLiteDatabase,date:String,source:String,kind:String,initialAvailable:Long) {
   var available=initialAvailable
@@ -237,9 +374,9 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    available-=charged
   }
  }
- private fun appendDebit(db:SQLiteDatabase,day:String,source:String,kind:String,amount:Long,at:Long) {
+ private fun appendDebit(db:SQLiteDatabase,day:String,source:String,kind:String,amount:Long,at:Long,consumptionDay:String?=null) {
   val previous=db.rawQuery("SELECT id,amount,created FROM ledger WHERE day=? AND task_id=? AND kind=? ORDER BY created DESC,rowid DESC LIMIT 1",arrayOf(day,source,kind)).use{if(it.moveToFirst())Triple(it.getString(0),it.getLong(1),it.getLong(2))else null}
-  if(previous!=null&&at-previous.third<60_000)db.update("ledger",cv("amount" to previous.second-amount,"created" to at),"id=?",arrayOf(previous.first)) else ledgerAt(db,day,source,kind,-amount,at)
+  if(previous!=null&&at-previous.third<60_000&&consumptionDay==null)db.update("ledger",cv("amount" to previous.second-amount,"created" to at),"id=?",arrayOf(previous.first)) else ledgerAt(db,day,source,kind,-amount,at,consumptionDay=consumptionDay)
  }
  private fun allocateSpend(db:SQLiteDatabase,day:String,kind:String,amount:Long,at:Long) {
   var remaining=amount
@@ -260,16 +397,41 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   events.forEach{(time,amount)->allocateSpend(db,day,kind,amount,time)}
   setSetting(marker,"true")
  }
- fun balance(kind: String, day: String = rewardDay()): Long = readableDatabase.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND kind=?",arrayOf(day,kind)).use { it.moveToFirst(); it.getLong(0).coerceAtLeast(0) }
+ private fun batchBalance(db: SQLiteDatabase, day: String, kind: String): Long {
+  if(isBatchExpired(day, now())) return 0L
+  return db.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND kind=?", arrayOf(day, kind)).use {
+   if(it.moveToFirst()) it.getLong(0).coerceAtLeast(0L) else 0L
+  }
+ }
+ fun balance(kind: String, day: String? = null): Long {
+  val db = readableDatabase
+  settleExpiredBatches(now())
+  val today = now().toLocalDate().toString()
+  val usageCap = dailyUsageCap(kind)
+  val consumedToday = consumedOnDate(db, today, kind)
+  val remainingCap = (usageCap - consumedToday).coerceAtLeast(0L)
+  if(day != null) {
+   val b = batchBalance(db, day, kind)
+   return minOf(b, remainingCap)
+  } else {
+   val active = activeBatchesSortedByExpiry(db, kind)
+   var total = 0L
+   for(batch in active) total += batchBalance(db, batch, kind)
+   return minOf(total, remainingCap)
+  }
+ }
  fun rewardSnapshot(kind:String,day:String=rewardDay()):RewardSnapshot {
-  fun total(where:String)=readableDatabase.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND kind=? AND $where",arrayOf(day,kind)).use{it.moveToFirst();it.getLong(0)}
+  settleExpiredBatches(now())
+  fun total(where:String,args:Array<String>)=readableDatabase.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE kind=? AND $where",arrayOf(kind,*args)).use{it.moveToFirst();it.getLong(0)}
+  val rem = balance(kind, day)
   return RewardSnapshot(
-   total("amount>0 AND task_id NOT LIKE 'sleep-refund:%'"),
-   -total("task_id='usage' AND amount<0"),
-   -total("task_id LIKE 'sleep:%' AND amount<0"),
-   -total("task_id='expiry' AND amount<0"),
-   -total("task_id LIKE 'revoke:%' AND amount<0"),balance(kind,day),
-   -total("task_id LIKE 'night:%' AND amount<>0"),
+   total("day=? AND amount>0 AND task_id NOT LIKE 'sleep-refund:%'", arrayOf(day)),
+   -total("day=? AND task_id='usage' AND amount<0", arrayOf(day)),
+   -total("day=? AND task_id LIKE 'sleep:%' AND amount<0", arrayOf(day)),
+   -total("day=? AND task_id='expiry' AND amount<0", arrayOf(day)),
+   -total("day=? AND task_id LIKE 'revoke:%' AND amount<0", arrayOf(day)),
+   rem,
+   nightDeducted(day, kind)
   )
  }
  fun nightWrapUpConfig()=NightWrapUpConfig(
@@ -312,11 +474,40 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   return readableDatabase.rawQuery("SELECT COALESCE(SUM(CAST(value AS INTEGER)),0) FROM settings WHERE key GLOB ?",arrayOf(pattern)).use{it.moveToFirst();it.getLong(0).coerceAtLeast(0)}
  }
  fun nightDeducted(day:String=rewardDay(),kind:String="video"):Long = readableDatabase.rawQuery(
-  "SELECT COALESCE(-SUM(amount),0) FROM ledger WHERE day=? AND kind=? AND task_id LIKE ? AND amount<>0",
-  arrayOf(day,kind,"night:$kind:%")
+  "SELECT COALESCE(-SUM(amount),0) FROM ledger WHERE kind=? AND (day=? OR task_id LIKE 'night:' || ? || ':' || ? || ':%') AND task_id LIKE 'night:%' AND amount<>0",
+  arrayOf(kind, day, kind, day)
  ).use{it.moveToFirst();it.getLong(0)}
- fun consume(kind: String, amount: Long, day: String = rewardDay()) { val db = writableDatabase; db.beginTransaction(); try { allocateLegacySpending(db,day,kind);val actual = minOf(balance(kind,day),amount.coerceAtLeast(0)); if(actual > 0) {val created=System.currentTimeMillis();appendDebit(db,day,"usage",kind,actual,created);allocateSpend(db,day,kind,actual,created)}; db.setTransactionSuccessful() } finally { db.endTransaction() } }
- fun claim(task: Task, kind: String) { val db = writableDatabase; db.beginTransaction(); try { val fresh = tasks(task.date).first { it.id == task.id }; if (eligible(task.date) && fresh.typeKnown && !fresh.required && fresh.done && !fresh.claimed && task.date == day()) { val amount = if(kind == "video") fresh.rewardMinutes * 60000L else fresh.rewardGames.toLong(); require(amount > 0); grantReward(db,rewardDay(),task.id,kind,amount); db.update("tasks",cv("claimed" to true),"id=?",arrayOf(task.id)) }; db.setTransactionSuccessful() } finally { db.endTransaction() } }
+ fun consume(kind: String, amount: Long, day: String? = null) {
+  if(amount <= 0) return
+  val db = writableDatabase; db.beginTransaction()
+  try {
+   settleExpiredBatches(now())
+   val today = now().toLocalDate().toString()
+   val at = System.currentTimeMillis()
+   val usageCap = dailyUsageCap(kind)
+   val consumedToday = consumedOnDate(db, today, kind)
+   val remainingCap = (usageCap - consumedToday).coerceAtLeast(0L)
+   var need = minOf(amount, remainingCap)
+   if(need <= 0L) { db.setTransactionSuccessful(); return }
+   val batches = if(day != null) {
+    if(isBatchExpired(day, now())) emptyList() else listOf(day)
+   } else {
+    activeBatchesSortedByExpiry(db, kind)
+   }
+   for(b in batches) {
+    if(need <= 0L) break
+    allocateLegacySpending(db, b, kind)
+    val availableInBatch = batchBalance(db, b, kind)
+    if(availableInBatch <= 0L) continue
+    val take = minOf(availableInBatch, need)
+    appendDebit(db, b, "usage", kind, take, at, consumptionDay = today)
+    allocateSpend(db, b, kind, take, at)
+    need -= take
+   }
+   db.setTransactionSuccessful()
+  } finally { db.endTransaction() }
+ }
+ fun claim(task: Task, kind: String) { val db = writableDatabase; db.beginTransaction(); try { val fresh = tasks(task.date).first { it.id == task.id }; if (eligible(task.date) && fresh.typeKnown && !fresh.required && fresh.done && !fresh.claimed && task.date == day()) { val amount = if(kind == "video") fresh.rewardMinutes * 60000L else fresh.rewardGames.toLong(); require(amount > 0); grantReward(db,task.date,task.id,kind,amount); db.update("tasks",cv("claimed" to true),"id=?",arrayOf(task.id)) }; db.setTransactionSuccessful() } finally { db.endTransaction() } }
  fun start(task: Task) { val fresh=tasks(task.date).first{it.id==task.id};if(fresh.done || fresh.runningSince != 0L) return; runningTasks().forEach{pause(it)};writableDatabase.update("tasks",cv("running_since" to SystemClock.elapsedRealtime(),"boot_time" to (System.currentTimeMillis()-SystemClock.elapsedRealtime())),"id=?",arrayOf(task.id)) }
  fun elapsed(task: Task): Long { val sameBoot = kotlin.math.abs((System.currentTimeMillis()-SystemClock.elapsedRealtime()) - task.bootTime) < 120000; return task.elapsed + if(task.runningSince > 0 && sameBoot) (SystemClock.elapsedRealtime()-task.runningSince).coerceAtLeast(0) else 0 }
  fun pause(task: Task) { val fresh=tasks(task.date).first{it.id==task.id};if(fresh.runningSince==0L)return;writableDatabase.update("tasks",cv("elapsed" to elapsed(fresh),"running_since" to 0L,"boot_time" to 0L),"id=?",arrayOf(task.id)) }
@@ -339,7 +530,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    if(fresh.required) {
     listOf("video" to fresh.rewardMinutes.toLong()*60000L,"game" to fresh.rewardGames.toLong()).forEach { (kind,amount) ->
      val key="task_reward_${fresh.id}_$kind"
-     if(amount>0 && setting(key)!="true") { grantReward(db,rewardDay(),fresh.id,kind,amount);setSetting(key,"true") }
+     if(amount>0 && setting(key)!="true") { grantReward(db,fresh.date,fresh.id,kind,amount);setSetting(key,"true") }
     }
    }
    db.setTransactionSuccessful()
@@ -410,7 +601,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    val out=mutableListOf<Pair<Long,String>>()
   readableDatabase.rawQuery("SELECT l.day,l.kind,l.amount,l.task_id,l.created,t.title FROM ledger l LEFT JOIN tasks t ON t.id=l.task_id WHERE l.amount<>0 AND l.kind NOT LIKE '%_allocation' ORDER BY l.created DESC,l.rowid DESC LIMIT 100",null).use {c->while(c.moveToNext()) {
    val amount=c.getLong(2);val source=c.getString(3);val eventTime=java.time.Instant.ofEpochMilli(c.getLong(4)).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime();val absolute=kotlin.math.abs(amount);val value=if(c.getString(1)=="video") {val minutes=absolute/60000;val seconds=absolute%60000/1000;when{minutes==0L->"${seconds.coerceAtLeast(1)} 秒";seconds==0L->"$minutes 分钟";else->"$minutes 分 $seconds 秒"}} else "${absolute} 局"
-    val title=c.getString(5);val label=when{source=="expiry"->"奖励到期 −$value";source=="usage"->"已使用 $value";source.startsWith("sleep:")->"睡眠规则抵扣 −$value";source.startsWith("sleep-refund:")->"睡眠记录修正返还 +$value";source.startsWith("night:")->if(amount<0)"夜间收尾抵扣 −$value" else "夜间抵扣冲回 +$value";source.startsWith("revoke:")||amount<0->"任务奖励冲回 −$value";source=="base"->"基础奖励 +$value";else->"${if(readableDatabase.rawQuery("SELECT required FROM tasks WHERE id=?",arrayOf(source)).use{it.moveToFirst()&&it.getInt(0)!=0})"必做奖励" else "选做奖励"} · ${title?:"历史任务"} +$value"}
+    val title=c.getString(5);val label=when{source=="expiry"->"奖励到期 −$value";source=="usage"->"已使用 $value";source.startsWith("cap:")->"每日获取上限扣减 −$value";source.startsWith("sleep:")->"睡眠规则抵扣 −$value";source.startsWith("sleep-refund:")->"睡眠记录修正返还 +$value";source.startsWith("night:")->if(amount<0)"夜间收尾抵扣 −$value" else "夜间抵扣冲回 +$value";source.startsWith("revoke:")||amount<0->"任务奖励冲回 −$value";source=="base"->"基础奖励 +$value";else->"${if(readableDatabase.rawQuery("SELECT required FROM tasks WHERE id=?",arrayOf(source)).use{it.moveToFirst()&&it.getInt(0)!=0})"必做奖励" else "选做奖励"} · ${title?:"历史任务"} +$value"}
     val time=eventTime.toLocalTime().toString().take(5);out.add(c.getLong(4) to "${eventTime.monthValue}月${eventTime.dayOfMonth}日 $time · $label")
   } }
    readableDatabase.rawQuery("SELECT day,detail,created FROM audit WHERE detail LIKE '紧急解锁%' OR detail='恢复保护' ORDER BY created DESC LIMIT 30",null).use { c -> while(c.moveToNext()) {
@@ -442,7 +633,16 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
       val granted = db.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND task_id=? AND kind=?",arrayOf(bucket,source,kind)).use { it.moveToFirst(); it.getLong(0) }
       val spent = db.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND task_id=? AND kind=?",arrayOf(bucket,source,allocationKind(kind))).use { it.moveToFirst(); it.getLong(0) }
       val reversal = minOf((granted+spent).coerceAtLeast(0),balance(kind,bucket))
-      if(reversal > 0) ledger(db,bucket,"revoke:$source",kind,-reversal)
+      if(reversal > 0) ledger(db,bucket,"revoke:$source",kind,-reversal,taskDay=bucket)
+      val capDebited = db.rawQuery("SELECT COALESCE(-SUM(amount),0) FROM ledger WHERE day=? AND kind=? AND task_id='cap:daily_limit'", arrayOf(bucket, kind)).use { it.moveToFirst(); it.getLong(0) }
+      if(capDebited > 0) {
+       val earnCap = dailyEarnCap(kind)
+       val netAfter = db.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND kind=? AND task_id NOT IN ('usage','expiry')", arrayOf(bucket, kind)).use { it.moveToFirst(); it.getLong(0) }
+       if(netAfter < earnCap) {
+        val refund = minOf(capDebited, earnCap - netAfter)
+        if(refund > 0) ledger(db, bucket, "cap-refund", kind, refund, taskDay = bucket)
+       }
+      }
      }
     }
     // Reopening an optional task must also reopen its one-time reward choice.
@@ -455,16 +655,475 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    db.setTransactionSuccessful()
   } finally { db.endTransaction() }
  }
- fun sleepTargets()=listOf(setting("sleep_bed_target","01:00"),setting("sleep_wake_target","07:30"),setting("sleep_bed_penalty","15"),setting("sleep_wake_penalty","15"))
- fun saveSleepTargets(bed:String,wake:String,bedPenalty:Int,wakePenalty:Int) {
+ fun sleepWindowMinutes(bed: String, wake: String): Long {
+  val bedTime = java.time.LocalTime.parse(bed)
+  val wakeTime = java.time.LocalTime.parse(wake)
+  val bedDateTime = if (bedTime.hour >= 12) java.time.LocalDate.of(2000, 1, 1).atTime(bedTime) else java.time.LocalDate.of(2000, 1, 2).atTime(bedTime)
+  val wakeDateTime = java.time.LocalDate.of(2000, 1, 2).atTime(wakeTime)
+  return java.time.Duration.between(bedDateTime, wakeDateTime).toMinutes()
+ }
+ fun isSleepTargetValid(bed: String, wake: String): Boolean = sleepWindowMinutes(bed, wake) >= 420L
+
+ fun sleepTargets()=listOf(setting("sleep_bed_target","00:30"),setting("sleep_wake_target","07:30"),setting("sleep_bed_penalty","15"),setting("sleep_wake_penalty","15"))
+ fun saveSleepTargets(bed:String,wake:String,bedPenalty:Int=15,wakePenalty:Int=15) {
   java.time.LocalTime.parse(bed);java.time.LocalTime.parse(wake);require(bedPenalty>=0&&wakePenalty>=0)
+  require(isSleepTargetValid(bed, wake)) { "配置被拒绝：目标睡眠窗口不足7小时（实际为 ${sleepWindowMinutes(bed, wake)} 分钟），无法满足最低睡眠时长底线" }
   setSetting("sleep_bed_target",bed);setSetting("sleep_wake_target",wake);setSetting("sleep_bed_penalty",bedPenalty.toString());setSetting("sleep_wake_penalty",wakePenalty.toString())
  }
+
+ fun calculateSleepDurationMinutes(cycleDate: String, bedtime: String, wakeTime: String): Long {
+  val bedTime = java.time.LocalTime.parse(bedtime)
+  val wake = java.time.LocalTime.parse(wakeTime)
+  val date = java.time.LocalDate.parse(cycleDate)
+  val bedDateTime = if (bedTime.hour >= 12) date.minusDays(1).atTime(bedTime) else date.atTime(bedTime)
+  val wakeDateTime = date.atTime(wake)
+  return java.time.Duration.between(bedDateTime, wakeDateTime).toMinutes()
+ }
+
+ fun sleepPenaltyMinutes(level: Int): Int = minOf(30, 5 * level.coerceAtLeast(0))
+ fun sleepPenaltyGames(level: Int): Int = minOf(2, (level.coerceAtLeast(0)) / 2)
+
+ fun sleepPenaltyEffectiveDate(cycleDate: String): String {
+  val nextDay = setting("sleep_penalty_next_day", "true") == "true"
+  return if (nextDay) java.time.LocalDate.parse(cycleDate).plusDays(1).toString() else cycleDate
+ }
+
+ fun sleepLevel(cycleDate: String = day()): Int {
+  val saved = setting("sleep_level_$cycleDate")
+  if (saved.isNotBlank()) return saved.toIntOrNull() ?: 0
+  val rec = sleepRecord(cycleDate)
+  if (rec != null) return rec.level
+  return setting("sleep_failure_level", "0").toIntOrNull() ?: 0
+ }
+
+ fun sleepLevelBefore(cycleDate: String): Int {
+  val priorDates = mutableListOf<String>()
+  readableDatabase.rawQuery("SELECT key FROM settings WHERE (key GLOB 'sleep_level_*' OR key GLOB 'sleep_record_*')", null).use { c ->
+   while (c.moveToNext()) {
+    val k = c.getString(0)
+    val d = if (k.startsWith("sleep_level_")) k.removePrefix("sleep_level_") else k.removePrefix("sleep_record_")
+    if (d < cycleDate && d !in priorDates) priorDates.add(d)
+   }
+  }
+  val latest = priorDates.maxOrNull() ?: return 0
+  return sleepLevel(latest)
+ }
+
+ fun sleepStatus(cycleDate: String = day()): SleepStatus {
+  val cycle = sleepRecord(cycleDate) ?: return SleepStatus.UNVERIFIED
+  return cycle.status
+ }
+
+ fun isSleepUnverifiedOverdue(cycleDate: String, at: LocalDateTime = now()): Boolean {
+  val rec = sleepRecord(cycleDate)
+  if (rec != null && rec.status != SleepStatus.UNVERIFIED) return false
+  val date = runCatching { java.time.LocalDate.parse(cycleDate) }.getOrNull() ?: return false
+  val targets = sleepTargets()
+  val wakeTime = runCatching { java.time.LocalTime.parse(targets[1]) }.getOrDefault(java.time.LocalTime.of(7, 30))
+  val wakeDateTime = date.atTime(wakeTime)
+  val overdueThreshold = wakeDateTime.plusHours(24)
+  return at >= overdueThreshold
+ }
+
+ fun hasSleepBeenReminded(cycleDate: String): Boolean =
+  setting("sleep_reminded_$cycleDate") == "true"
+
+ fun markSleepReminded(cycleDate: String) {
+  setSetting("sleep_reminded_$cycleDate", "true")
+ }
+
  fun sleepRecord(date:String=day()):SleepRecord? {
   val json=setting("sleep_record_$date");if(json.isBlank())return null
-  val o=org.json.JSONObject(json);return SleepRecord(date,o.getString("bedtime"),o.getString("wake"),o.getLong("bed_penalty"),o.getLong("wake_penalty"),o.getBoolean("excepted"),o.optString("reason"),o.optString("source","manual"))
+  val o=org.json.JSONObject(json)
+  val statusStr = o.optString("status", "")
+  val status = if (statusStr.isNotBlank()) {
+   try { SleepStatus.valueOf(statusStr) } catch(e: Exception) {
+    if (o.optBoolean("excepted", false)) SleepStatus.PAUSED else if (o.optLong("bed_penalty", 0L) == 0L && o.optLong("wake_penalty", 0L) == 0L) SleepStatus.PASS else SleepStatus.FAIL
+   }
+  } else {
+   if (o.optBoolean("excepted", false)) SleepStatus.PAUSED else if (o.optLong("bed_penalty", 0L) == 0L && o.optLong("wake_penalty", 0L) == 0L) SleepStatus.PASS else SleepStatus.FAIL
+  }
+  return SleepRecord(
+   date = date,
+   bedtime = o.getString("bedtime"),
+   wakeTime = o.getString("wake"),
+   bedtimePenalty = o.optLong("bed_penalty", 0L),
+   wakePenalty = o.optLong("wake_penalty", 0L),
+   excepted = o.optBoolean("excepted", false),
+   reason = o.optString("reason", ""),
+   source = o.optString("source","manual"),
+   status = status,
+   version = o.optInt("version", 1),
+   prepareBedtime = o.optString("prepare_bedtime", "").ifBlank { null },
+   durationMinutes = o.optLong("duration_minutes", 0L),
+   effectiveDate = o.optString("effective_date", date),
+   level = o.optInt("level", 0),
+   penaltyMinutes = o.optInt("penalty_minutes", 0),
+   penaltyGames = o.optInt("penalty_games", 0)
+  )
  }
- fun pendingSleepPenalty():Long = readableDatabase.rawQuery("SELECT COALESCE(SUM(CAST(value AS INTEGER)),0) FROM settings WHERE key GLOB 'sleep_pending_*'",null).use{it.moveToFirst();it.getLong(0)}
+
+ fun pendingSleepPenalty(kind: String = "video", date: String? = null, cycleDate: String? = null): Long {
+  if(kind == "video") {
+   val legacy = if (cycleDate != null) 0L else readableDatabase.rawQuery("SELECT COALESCE(SUM(CAST(value AS INTEGER)),0) FROM settings WHERE key GLOB 'sleep_pending_*' AND key NOT GLOB 'sleep_pending_game_*' AND key NOT GLOB 'sleep_pending_video_*'",null).use{it.moveToFirst();it.getLong(0)}
+   var v1 = 0L
+   readableDatabase.rawQuery("SELECT key, value FROM settings WHERE key GLOB 'sleep_pending_video_*' AND CAST(value AS INTEGER)>0", null).use { c ->
+    while (c.moveToNext()) {
+     val key = c.getString(0)
+     val parts = key.removePrefix("sleep_pending_video_").split('_')
+     if (parts.size >= 2) {
+      val effectiveDate = parts[0]
+      val cDate = parts[1]
+      if (cycleDate != null && cDate != cycleDate) continue
+      if (date == null || date >= effectiveDate) {
+       v1 += c.getString(1).toLong()
+      }
+     }
+    }
+   }
+   return legacy + v1
+  } else {
+   var v1 = 0L
+   readableDatabase.rawQuery("SELECT key, value FROM settings WHERE key GLOB 'sleep_pending_game_*' AND CAST(value AS INTEGER)>0", null).use { c ->
+    while (c.moveToNext()) {
+     val key = c.getString(0)
+     val parts = key.removePrefix("sleep_pending_game_").split('_')
+     if (parts.size >= 2) {
+      val effectiveDate = parts[0]
+      val cDate = parts[1]
+      if (cycleDate != null && cDate != cycleDate) continue
+      if (date == null || date >= effectiveDate) {
+       v1 += c.getString(1).toLong()
+      }
+     }
+    }
+   }
+   return v1
+  }
+ }
+
+ fun hasTrustedAutoSleepRecord(cycleDate: String): Boolean {
+  val rec = sleepRecord(cycleDate)
+  val hasImportId = setting("sleep_import_id_$cycleDate").isNotBlank()
+  return (rec != null && rec.source != "manual" && rec.source.isNotBlank()) || hasImportId
+ }
+
+ fun recordSleepCycle(
+  cycleDate: String,
+  bedtime: String,
+  wakeTime: String,
+  excepted: Boolean = false,
+  reason: String = "",
+  prepareBedtime: String? = null,
+  source: String = "health_connect",
+  forcedStatus: SleepStatus? = null,
+  actualSleepMinutes: Long? = null
+ ): SleepRecord = recordSleepCycleInternal(cycleDate, bedtime, wakeTime, excepted, reason, prepareBedtime, source, forcedStatus, isCascade = false, actualSleepMinutes = actualSleepMinutes)
+
+ private fun refundCycleDebit(db: SQLiteDatabase, cycleDate: String, kind: String, refundAmount: Long) {
+  if (refundAmount <= 0L) return
+  var remainingRefund = refundAmount
+  val debits = mutableListOf<Pair<String, Long>>()
+  db.rawQuery(
+   "SELECT day, -amount FROM ledger WHERE (task_id = 'sleep:cycle:' || ? OR task_id LIKE 'sleep:%:' || ?) AND kind=? AND amount<0 ORDER BY rowid DESC",
+   arrayOf(cycleDate, cycleDate, kind)
+  ).use { c ->
+   while (c.moveToNext()) {
+    debits.add(c.getString(0) to c.getLong(1))
+   }
+  }
+  for ((debitDay, debited) in debits) {
+   if (remainingRefund <= 0L) break
+   val toRefund = minOf(remainingRefund, debited)
+   ledger(db, debitDay, "sleep-refund:cycle:$cycleDate", kind, toRefund)
+   remainingRefund -= toRefund
+  }
+  if (remainingRefund > 0L) {
+   val targetDay = sleepPenaltyEffectiveDate(cycleDate)
+   ledger(db, targetDay, "sleep-refund:cycle:$cycleDate", kind, remainingRefund)
+  }
+  settleExpiredBatches(now())
+ }
+
+ private fun recordSleepCycleInternal(
+  cycleDate: String,
+  bedtime: String,
+  wakeTime: String,
+  excepted: Boolean = false,
+  reason: String = "",
+  prepareBedtime: String? = null,
+  source: String = "health_connect",
+  forcedStatus: SleepStatus? = null,
+  isCascade: Boolean = false,
+  actualSleepMinutes: Long? = null
+ ): SleepRecord {
+  val date = java.time.LocalDate.parse(cycleDate)
+  require(date <= java.time.LocalDate.parse(day())) { "未来睡眠周期不能提前记录" }
+  if (excepted) require(reason.isNotBlank()) { "特殊情况豁免必须填写原因" }
+
+  val old = sleepRecord(cycleDate)
+  // S10: Idempotent check
+  if (!isCascade && old != null && old.bedtime == bedtime && old.wakeTime == wakeTime && old.excepted == excepted && old.reason == reason.trim() && old.prepareBedtime == prepareBedtime && (forcedStatus == null || old.status == forcedStatus) && (actualSleepMinutes == null || old.durationMinutes == actualSleepMinutes)) {
+   return old
+  }
+  if (!isCascade && old != null && (old.bedtime != bedtime || old.wakeTime != wakeTime || old.excepted != excepted)) {
+   require(reason.isNotBlank()) { "修正已有睡眠记录必须填写更正原因" }
+  }
+
+  val hasAuto = hasTrustedAutoSleepRecord(cycleDate)
+  val isManualWithoutAuto = (source == "manual" && !hasAuto)
+
+  val inBedMinutes = calculateSleepDurationMinutes(cycleDate, bedtime, wakeTime)
+  val durationMinutes = if (actualSleepMinutes != null && actualSleepMinutes > 0L) actualSleepMinutes else inBedMinutes
+  val targets = sleepTargets()
+  val targetBed = targets[0]
+  val targetWake = targets[1]
+
+  val status = forcedStatus ?: when {
+   excepted -> SleepStatus.PAUSED
+   isManualWithoutAuto -> SleepStatus.UNVERIFIED
+   !isSleepTargetValid(targetBed, targetWake) -> SleepStatus.UNVERIFIED
+   else -> {
+    val targetBedTime = java.time.LocalTime.parse(targetBed)
+    val targetWakeTime = java.time.LocalTime.parse(targetWake)
+    val targetBedDateTime = if (targetBedTime.hour >= 12) date.minusDays(1).atTime(targetBedTime) else date.atTime(targetBedTime)
+    val targetWakeDateTime = date.atTime(targetWakeTime)
+
+    val actualBedTime = java.time.LocalTime.parse(bedtime)
+    val actualWakeTime = java.time.LocalTime.parse(wakeTime)
+    val actualBedDateTime = if (actualBedTime.hour >= 12) date.minusDays(1).atTime(actualBedTime) else date.atTime(actualBedTime)
+    val actualWakeDateTime = date.atTime(actualWakeTime)
+
+    val bedOnTime = !actualBedDateTime.isAfter(targetBedDateTime)
+    val wakeOnTime = !actualWakeDateTime.isAfter(targetWakeDateTime)
+    val durationOk = durationMinutes >= 420L
+
+    if (bedOnTime && wakeOnTime && durationOk) SleepStatus.PASS else SleepStatus.FAIL
+   }
+  }
+
+  val prevLevel = sleepLevelBefore(cycleDate)
+  val level = when (status) {
+   SleepStatus.PASS -> 0
+   SleepStatus.FAIL -> prevLevel + 1
+   SleepStatus.PAUSED, SleepStatus.UNVERIFIED -> prevLevel
+  }
+
+  val penaltyMin = if (status == SleepStatus.FAIL) sleepPenaltyMinutes(level) else 0
+  val penaltyGames = if (status == SleepStatus.FAIL) sleepPenaltyGames(level) else 0
+  val effectiveDate = sleepPenaltyEffectiveDate(cycleDate)
+  val version = (old?.version ?: 0) + 1
+  val actualReason = when {
+   isManualWithoutAuto && reason.isBlank() -> "人工登记差错更正，保持待核验，不予处罚"
+   status == SleepStatus.UNVERIFIED && !isSleepTargetValid(targetBed, targetWake) && reason.isBlank() -> "目标睡眠窗口不足7小时配置冲突，提示修正，避免自动判罚"
+   else -> reason.trim()
+  }
+  val savedSource = if (old != null && old.source != "manual" && source == "manual") old.source else source
+
+  val db = writableDatabase
+  db.beginTransaction()
+  try {
+   setSetting("sleep_level_$cycleDate", level.toString())
+   setSetting("sleep_failure_level", level.toString())
+
+   val videoKey = "sleep_pending_video_${effectiveDate}_${cycleDate}"
+   val totalRequiredVideo = penaltyMin * 60_000L
+   val deductedVideo = db.rawQuery("SELECT COALESCE(-SUM(amount), 0) FROM ledger WHERE (task_id = 'sleep:cycle:' || ? OR task_id LIKE 'sleep:%:' || ?) AND kind='video' AND amount<0", arrayOf(cycleDate, cycleDate)).use {
+    if (it.moveToFirst()) it.getLong(0) else 0L
+   }
+   val refundVideoKey = "sleep_refunded_video_$cycleDate"
+   val alreadyRefundedVideo = setting(refundVideoKey, "0").toLongOrNull() ?: 0L
+   val netDeductedVideo = (deductedVideo - alreadyRefundedVideo).coerceAtLeast(0L)
+
+   val pendingVideo = (totalRequiredVideo - netDeductedVideo).coerceAtLeast(0L)
+   setSetting(videoKey, pendingVideo.toString())
+
+   if (totalRequiredVideo < netDeductedVideo) {
+    val refundVideo = netDeductedVideo - totalRequiredVideo
+    refundCycleDebit(db, cycleDate, "video", refundVideo)
+    setSetting(refundVideoKey, (alreadyRefundedVideo + refundVideo).toString())
+   }
+
+   val gameKey = "sleep_pending_game_${effectiveDate}_${cycleDate}"
+   val totalRequiredGames = penaltyGames
+   val deductedGames = db.rawQuery("SELECT COALESCE(-SUM(amount), 0) FROM ledger WHERE (task_id = 'sleep:cycle:' || ? OR task_id LIKE 'sleep:%:' || ?) AND kind='game' AND amount<0", arrayOf(cycleDate, cycleDate)).use {
+    if (it.moveToFirst()) it.getInt(0) else 0
+   }
+   val refundGameKey = "sleep_refunded_game_$cycleDate"
+   val alreadyRefundedGames = setting(refundGameKey, "0").toIntOrNull() ?: 0
+   val netDeductedGames = (deductedGames - alreadyRefundedGames).coerceAtLeast(0)
+
+   val pendingGames = (totalRequiredGames - netDeductedGames).coerceAtLeast(0)
+   setSetting(gameKey, pendingGames.toString())
+
+   if (totalRequiredGames < netDeductedGames) {
+    val refundGames = netDeductedGames - totalRequiredGames
+    refundCycleDebit(db, cycleDate, "game", refundGames.toLong())
+    setSetting(refundGameKey, (alreadyRefundedGames + refundGames).toString())
+   }
+
+   val json = org.json.JSONObject()
+    .put("date", cycleDate)
+    .put("bedtime", bedtime)
+    .put("wake", wakeTime)
+    .put("bed_penalty", if (status == SleepStatus.FAIL) penaltyMin * 60_000L else 0L)
+    .put("wake_penalty", 0L)
+    .put("excepted", excepted)
+    .put("reason", actualReason)
+    .put("source", savedSource)
+    .put("status", status.name)
+    .put("level", level)
+    .put("penalty_minutes", penaltyMin)
+    .put("penalty_games", penaltyGames)
+    .put("effective_date", effectiveDate)
+    .put("version", version)
+    .put("duration_minutes", durationMinutes)
+    .put("prepare_bedtime", prepareBedtime ?: "")
+
+   setSetting("sleep_record_$cycleDate", json.toString())
+   setSetting("sleep_cycle_$cycleDate", json.toString())
+
+   val statusLabel = when (status) {
+    SleepStatus.PASS -> "达标（等级清零）"
+    SleepStatus.FAIL -> "未达标（等级升至 $level，扣减 $penaltyMin 分钟" + (if (penaltyGames > 0) "、$penaltyGames 局" else "") + "，次日 $effectiveDate 生效）"
+    SleepStatus.PAUSED -> "暂停豁免（保持等级 $level，原因：$actualReason）"
+    SleepStatus.UNVERIFIED -> "待核验（保持等级 $level" + (if (actualReason.isNotBlank()) "，提示：$actualReason" else "") + "）"
+   }
+   val auditDetail = "睡眠周期评估 [$cycleDate]: 入睡 $bedtime，起床 $wakeTime，时长 ${durationMinutes / 60}小时${durationMinutes % 60}分，判定：$statusLabel" +
+    if (isCascade) "；级联重算（受历史更正影响）" else if (version > 1) "；版本 $version（更正原因：$actualReason）" else ""
+   audit(cycleDate, auditDetail)
+
+   db.setTransactionSuccessful()
+  } finally {
+   db.endTransaction()
+  }
+
+  if (!isCascade) {
+   recalculateSubsequentCycles(cycleDate)
+  }
+
+  return SleepRecord(
+   date = cycleDate,
+   bedtime = bedtime,
+   wakeTime = wakeTime,
+   bedtimePenalty = if (status == SleepStatus.FAIL) penaltyMin * 60_000L else 0L,
+   wakePenalty = 0L,
+   excepted = excepted,
+   reason = actualReason,
+   source = savedSource,
+   status = status,
+   version = version,
+   prepareBedtime = prepareBedtime,
+   durationMinutes = durationMinutes,
+   effectiveDate = effectiveDate,
+   level = level,
+   penaltyMinutes = penaltyMin,
+   penaltyGames = penaltyGames
+  )
+ }
+
+ private fun recalculateSubsequentCycles(afterCycleDate: String) {
+  val subsequentDates = mutableListOf<String>()
+  readableDatabase.rawQuery("SELECT key FROM settings WHERE key GLOB 'sleep_record_*'", null).use { c ->
+   while (c.moveToNext()) {
+    val d = c.getString(0).removePrefix("sleep_record_")
+    if (d > afterCycleDate) subsequentDates.add(d)
+   }
+  }
+  subsequentDates.sort()
+  for (subDate in subsequentDates) {
+   val rec = sleepRecord(subDate) ?: continue
+   recordSleepCycleInternal(
+    cycleDate = subDate,
+    bedtime = rec.bedtime,
+    wakeTime = rec.wakeTime,
+    excepted = rec.excepted,
+    reason = rec.reason,
+    prepareBedtime = rec.prepareBedtime,
+    source = rec.source,
+    forcedStatus = if (rec.status == SleepStatus.UNVERIFIED) SleepStatus.UNVERIFIED else null,
+    isCascade = true
+   )
+  }
+  val allDates = mutableListOf<String>()
+  readableDatabase.rawQuery("SELECT key FROM settings WHERE key GLOB 'sleep_record_*'", null).use { c ->
+   while (c.moveToNext()) allDates.add(c.getString(0).removePrefix("sleep_record_"))
+  }
+  val latestDate = allDates.maxOrNull()
+  if (latestDate != null) {
+   val latestLevel = setting("sleep_level_$latestDate", "0")
+   setSetting("sleep_failure_level", latestLevel)
+  }
+ }
+
+ fun pauseSleepCycle(cycleDate: String, reason: String): SleepRecord {
+  require(reason.isNotBlank()) { "暂停豁免必须填写原因" }
+  val targets = sleepTargets()
+  return recordSleepCycle(cycleDate, targets[0], targets[1], excepted = true, reason = reason)
+ }
+
+ fun enableSleepSystemTasks(enabled: Boolean = true) { setSetting("sleep_system_tasks_enabled", enabled.toString()) }
+ fun ensureSleepSystemTasks(day: String = day()) {
+  val db = writableDatabase
+  val existing = mutableSetOf<String>()
+  db.rawQuery("SELECT title FROM tasks WHERE day=?", arrayOf(day)).use {
+   while(it.moveToNext()) existing.add(it.getString(0))
+  }
+  db.beginTransaction()
+  try {
+   if ("按时准备睡眠" !in existing) {
+    val id = UUID.nameUUIDFromBytes(("prepare_sleep_$day").toByteArray()).toString()
+    val values = cv(
+     "id" to id, "template_id" to "sleep_system_prep", "day" to day,
+     "title" to "按时准备睡眠", "required" to true, "minutes" to 0,
+     "mode" to "行动型", "checklist" to "系统睡眠管理任务",
+     "reward_minutes" to 0, "reward_games" to 0,
+     "recurrence" to "daily", "origin" to "sleep_system"
+    )
+    db.insertWithOnConflict("tasks", null, values, SQLiteDatabase.CONFLICT_IGNORE)
+   }
+   if ("按时起床" !in existing) {
+    val id = UUID.nameUUIDFromBytes(("wake_up_$day").toByteArray()).toString()
+    val values = cv(
+     "id" to id, "template_id" to "sleep_system_wake", "day" to day,
+     "title" to "按时起床", "required" to true, "minutes" to 0,
+     "mode" to "行动型", "checklist" to "系统睡眠管理任务",
+     "reward_minutes" to 0, "reward_games" to 0,
+     "recurrence" to "daily", "origin" to "sleep_system"
+    )
+    db.insertWithOnConflict("tasks", null, values, SQLiteDatabase.CONFLICT_IGNORE)
+   }
+   db.setTransactionSuccessful()
+  } finally {
+   db.endTransaction()
+  }
+ }
+
+ fun sleepPrepareTime(cycleDate: String = day()): String? =
+  setting("sleep_prepare_time_$cycleDate").ifBlank {
+   setting("sleep_prepare_$cycleDate").ifBlank { null }
+  }
+
+ fun setSleepPrepareTime(cycleDate: String = day(), time: String) {
+  setSetting("sleep_prepare_time_$cycleDate", time)
+  setSetting("sleep_prepare_$cycleDate", time)
+ }
+
+ fun prepareSleep(time: String = now().toLocalTime().toString().take(5), cycleDate: String = day()) {
+  setSleepPrepareTime(cycleDate, time)
+  audit(cycleDate, "准备就寝确认：$time")
+  val task = tasks(cycleDate).firstOrNull { it.title == "按时准备睡眠" }
+  if (task != null && !task.done) complete(task)
+ }
+
+ fun confirmWake(wakeTime: String = now().toLocalTime().toString().take(5), actualBedtime: String? = null, cycleDate: String = day()): SleepRecord {
+  val prepTime = sleepPrepareTime(cycleDate)
+  val bed = actualBedtime ?: prepTime ?: sleepTargets()[0]
+  val task = tasks(cycleDate).firstOrNull { it.title == "按时起床" }
+  if (task != null && !task.done) complete(task)
+  return recordSleepCycle(cycleDate, bed, wakeTime, prepareBedtime = prepTime, source = "manual")
+ }
+
  fun recordSleep(date:String,bedtime:String,wake:String,excepted:Boolean=false,reason:String="",source:String="manual") {
   val bed=java.time.LocalTime.parse(bedtime);val woke=java.time.LocalTime.parse(wake);val old=sleepRecord(date)
   require(LocalDate.parse(date)<=LocalDate.parse(day()) && (!excepted||reason.isNotBlank()) && (old==null || old.bedtime==bedtime&&old.wakeTime==wake&&old.excepted==excepted || reason.isNotBlank()))
@@ -488,7 +1147,9 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    val bedPenalty=reconcile("bedtime",old?.bedtimePenalty?:0,desiredBed)
    val wakePenalty=reconcile("wake",old?.wakePenalty?:0,desiredWake)
    val pending=pendingSleepPenalty()
-   val record=org.json.JSONObject().put("bedtime",bedtime).put("wake",wake).put("bed_penalty",bedPenalty).put("wake_penalty",wakePenalty).put("excepted",excepted).put("reason",reason.trim()).put("source",source)
+   val durationMinutes = calculateSleepDurationMinutes(date, bedtime, wake)
+   val status = if (excepted) SleepStatus.PAUSED else if (bedPenalty == 0L && wakePenalty == 0L && durationMinutes >= 420L) SleepStatus.PASS else SleepStatus.FAIL
+   val record=org.json.JSONObject().put("bedtime",bedtime).put("wake",wake).put("bed_penalty",bedPenalty).put("wake_penalty",wakePenalty).put("excepted",excepted).put("reason",reason.trim()).put("source",source).put("duration_minutes",durationMinutes).put("status",status.name)
    setSetting("sleep_record_$date",record.toString())
    val detail=if(excepted) "睡眠例外：${reason.trim()}" else "手动睡眠记录：就寝 $bedtime，起床 $wake；待后续奖励发放扣减 ${(bedPenalty+wakePenalty)/60000} 分钟"+(if(old!=null)"；修正原因：${reason.trim()}" else "")
    if(pending>0)audit(date,"睡眠扣减待下次奖励抵扣：${pending/60000} 分钟")
@@ -498,11 +1159,11 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
  private fun issueCompletedRequiredRewards(db:SQLiteDatabase,date:String) {
   if(date!=day())return
   val ownsTransaction=!db.inTransaction();if(ownsTransaction)db.beginTransaction()
-  try {db.rawQuery("SELECT * FROM tasks WHERE day=? AND required=1 AND done=1",arrayOf(date)).use{c->while(c.moveToNext()){
+  try {db.rawQuery("SELECT * FROM tasks WHERE day=? AND required=1 AND done=1 AND origin!='sleep_system'",arrayOf(date)).use{c->while(c.moveToNext()){
     val task=c.task()
     listOf("video" to task.rewardMinutes.toLong()*60000L,"game" to task.rewardGames.toLong()).forEach{(kind,amount)->
      val key="task_reward_${task.id}_$kind"
-     if(amount>0&&setting(key)!="true") {grantReward(db,rewardDay(),task.id,kind,amount);setSetting(key,"true")}
+     if(amount>0&&setting(key)!="true") {grantReward(db,date,task.id,kind,amount);setSetting(key,"true")}
     }
    }};if(ownsTransaction)db.setTransactionSuccessful()
   } finally {if(ownsTransaction)db.endTransaction()}
@@ -535,16 +1196,16 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    val date=cursor.toString()
    val contractRow=readableDatabase.rawQuery("SELECT confirmed,rest FROM contracts WHERE day=?",arrayOf(date)).use{if(it.moveToFirst())(it.getInt(0)!=0) to (it.getInt(1)!=0) else null}
    var required=0;var done=0
-   readableDatabase.rawQuery("SELECT required,done FROM tasks WHERE day=?",arrayOf(date)).use{while(it.moveToNext()){if(it.getInt(0)!=0){required++;if(it.getInt(1)!=0)done++}}}
+   readableDatabase.rawQuery("SELECT required,done FROM tasks WHERE day=? AND origin!='sleep_system'",arrayOf(date)).use{while(it.moveToNext()){if(it.getInt(0)!=0){required++;if(it.getInt(1)!=0)done++}}}
    val valid=contractRow?.second!=true&&required>0
    if(valid){plan30++;if(done==required)achieved30++;if(!cursor.isBefore(from7)){plan7++;if(done==required)achieved7++}}
    cursor=cursor.plusDays(1)
   }
-  var focus=readableDatabase.rawQuery("SELECT COALESCE(SUM(elapsed),0) FROM tasks WHERE id NOT IN (SELECT source_id FROM task_moves) AND day<=?",arrayOf(today)).use{it.moveToFirst();it.getLong(0)}
-  runningTasks().forEach{task->focus+=(elapsed(task)-task.elapsed).coerceAtLeast(0L)}
+  var focus=readableDatabase.rawQuery("SELECT COALESCE(SUM(elapsed),0) FROM tasks WHERE origin!='sleep_system' AND id NOT IN (SELECT source_id FROM task_moves) AND day<=?",arrayOf(today)).use{it.moveToFirst();it.getLong(0)}
+  runningTasks().filter{it.origin!="sleep_system"}.forEach{task->focus+=(elapsed(task)-task.elapsed).coerceAtLeast(0L)}
   return GrowthPeriodStats(plan30,achieved30,plan7,achieved7,focus)
  }
- fun xp(): Int = readableDatabase.rawQuery("SELECT COUNT(*) FROM tasks WHERE done=1 AND id NOT IN (SELECT source_id FROM task_moves)", null).use { it.moveToFirst(); it.getInt(0)*100 }
+ fun xp(): Int = readableDatabase.rawQuery("SELECT COUNT(*) FROM tasks WHERE done=1 AND origin!='sleep_system' AND id NOT IN (SELECT source_id FROM task_moves)", null).use { it.moveToFirst(); it.getInt(0)*100 }
  fun streak(): Int {
   val states=history().toMap();var d=LocalDate.parse(day());var count=0
   if(states[d.toString()]!="完成")d=d.minusDays(1)

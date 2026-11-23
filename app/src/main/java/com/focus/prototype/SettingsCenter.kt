@@ -1,5 +1,6 @@
 package com.focus.prototype
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,9 +34,29 @@ internal fun SettingsPageHeader(title: String, backLabel: String, onBack: () -> 
 }
 
 @Composable
+internal fun SettingsItemRow(
+    title: String,
+    status: String? = null,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp, horizontal = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+        if (status != null) Text(status, style = MaterialTheme.typography.labelMedium, color = AppColors.Accent)
+        Text("›", fontSize = 22.sp, color = AppColors.Muted)
+    }
+}
+
+@Composable
 internal fun SettingsDestinationRow(
     title: String,
-    summary: String,
     status: String? = null,
     onClick: () -> Unit,
 ) {
@@ -47,14 +68,11 @@ internal fun SettingsDestinationRow(
         contentColor = AppColors.Text,
     ) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 76.dp).padding(horizontal = 18.dp, vertical = 14.dp),
+            Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 18.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                Text(summary, style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
-            }
+            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             if (status != null) Text(status, style = MaterialTheme.typography.labelMedium, color = AppColors.Accent)
             Spacer(Modifier.width(1.dp))
             Text("›", fontSize = 26.sp, color = AppColors.Muted)

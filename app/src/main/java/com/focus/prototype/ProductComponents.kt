@@ -161,7 +161,6 @@ private data class GrowthSnapshot(val planDays: Int, val achievedDays: Int, val 
   Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
    Column(verticalArrangement=Arrangement.spacedBy(3.dp)) {
     Text("等级 $level · $rank",style=MaterialTheme.typography.headlineSmall.copy(fontWeight=FontWeight.ExtraBold))
-    Text("每完成一项任务 +100 XP",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
    }
    Row(verticalAlignment=Alignment.Bottom,horizontalArrangement=Arrangement.spacedBy(5.dp)) {
     MotionCounter(xp,MaterialTheme.typography.headlineSmall.copy(fontWeight=FontWeight.Bold),AppMotion.Growth)
@@ -196,7 +195,10 @@ private data class GrowthSnapshot(val planDays: Int, val achievedDays: Int, val 
 
 @Composable private fun GrowthMetric(label:String,value:String,modifier:Modifier,onClick:(()->Unit)?=null) {
  Column(modifier.then(if(onClick!=null)Modifier.clickable(onClick=onClick) else Modifier).background(MaterialTheme.colorScheme.surfaceContainer,MaterialTheme.shapes.medium).padding(horizontal=10.dp,vertical=11.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
-  Text(label,style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1)
+  Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+   Text(label,style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1)
+   if(onClick!=null) Text("›", style=MaterialTheme.typography.labelSmall, color=MaterialTheme.colorScheme.primary)
+  }
   Text(value,style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.SemiBold,maxLines=1,softWrap=false)
  }
 }

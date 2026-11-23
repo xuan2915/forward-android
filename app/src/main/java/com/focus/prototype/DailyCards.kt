@@ -148,15 +148,16 @@ internal object DailyCards {
             if (old?.valid == true) db.setSetting(key, encode(old.copy(valid = false)))
             return null
         }
+        val ordinary = tasks.filter { it.origin != "sleep_system" }
         val composition = dailyCardComposition(date)
-        val chosenIds = old?.takeIf { it.saved }?.selectedTaskIds ?: tasks.map { it.id }
-        val chosenTitles = old?.takeIf { it.saved }?.taskTitles ?: tasks.filter { it.id in chosenIds }.map { it.title }
+        val chosenIds = old?.takeIf { it.saved }?.selectedTaskIds ?: ordinary.map { it.id }
+        val chosenTitles = old?.takeIf { it.saved }?.taskTitles ?: ordinary.filter { it.id in chosenIds }.map { it.title }
         val record = DailyCardRecord(
             date = date,
             quote = old?.quote?.takeIf(String::isNotBlank) ?: composition.excerpt.chinese,
-            completed = tasks.count { it.done },
-            total = tasks.size,
-            focusMinutes = tasks.sumOf { it.elapsed }.coerceAtLeast(0L) / 60_000L,
+            completed = ordinary.count { it.done },
+            total = ordinary.size,
+            focusMinutes = ordinary.sumOf { it.elapsed }.coerceAtLeast(0L) / 60_000L,
             taskTitles = chosenTitles,
             unlockedAt = old?.unlockedAt?.takeIf { it > 0L } ?: System.currentTimeMillis(),
             valid = true,

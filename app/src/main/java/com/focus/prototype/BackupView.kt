@@ -65,7 +65,6 @@ fun BackupView(db: Database, onChanged: () -> Unit, onRestored: () -> Unit = {})
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("数据备份", style = MaterialTheme.typography.titleLarge)
         Text("最近成功：${lastSuccess.toLocalDateTimeText()}", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
         Text("保存位置：${location?.let { android.net.Uri.parse(it).lastPathSegment } ?: "未选择"}", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

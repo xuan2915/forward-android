@@ -296,7 +296,7 @@ private fun AuditLogSection(db: Database, refreshKey: Int) {
         }
         AnimatedVisibility(expanded) {
             QuietSurface {
-                if (records.isEmpty()) Text("计划调整、睡眠例外和应用保护记录会显示在这里", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+                if (records.isEmpty()) Text("暂无记录", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
                 records.forEach { record ->
                     Text(
                         "${record.date}  ·  ${record.detail}",
@@ -462,7 +462,7 @@ private data class TaskStats(val completed: Int, val total: Int, val focusMinute
 
 private fun taskStats(db: Database, from: LocalDate, to: LocalDate): TaskStats =
     db.readableDatabase.rawQuery(
-        "SELECT COUNT(*),COALESCE(SUM(done),0),COALESCE(SUM(elapsed),0) FROM tasks WHERE day>=? AND day<=? AND id NOT IN (SELECT source_id FROM task_moves)",
+        "SELECT COUNT(*),COALESCE(SUM(done),0),COALESCE(SUM(elapsed),0) FROM tasks WHERE day>=? AND day<=? AND origin!='sleep_system' AND id NOT IN (SELECT source_id FROM task_moves)",
         arrayOf(from.toString(), to.toString()),
     ).use { cursor ->
         cursor.moveToFirst()
@@ -474,7 +474,7 @@ internal fun completedTasksBetween(db: Database, start: LocalDate, endExclusive:
     val from = start.atStartOfDay(zone).toInstant().toEpochMilli()
     val until = endExclusive.atStartOfDay(zone).toInstant().toEpochMilli()
     return db.readableDatabase.rawQuery(
-        "SELECT id,title,completed_at,elapsed FROM tasks WHERE done=1 AND completed_at>=? AND completed_at<? AND id NOT IN (SELECT source_id FROM task_moves) ORDER BY completed_at DESC,rowid DESC",
+        "SELECT id,title,completed_at,elapsed FROM tasks WHERE done=1 AND origin!='sleep_system' AND completed_at>=? AND completed_at<? AND id NOT IN (SELECT source_id FROM task_moves) ORDER BY completed_at DESC,rowid DESC",
         arrayOf(from.toString(), until.toString()),
     ).use { cursor ->
         buildList {

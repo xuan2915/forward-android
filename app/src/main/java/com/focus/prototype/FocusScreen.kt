@@ -36,7 +36,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -171,7 +170,7 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
                 }
             }
         } else {
-            Text("今天没有待做任务", color = AppColors.Muted, style = MaterialTheme.typography.bodyMedium)
+            Text("暂无待专注任务", color = AppColors.Muted, style = MaterialTheme.typography.bodyMedium)
         }
 
         val morph by animateFloatAsState(if (running) 1f else 0f, tween(motionMillis()), label = "play-pause")
@@ -199,17 +198,6 @@ fun FocusScreen(db: Database, timer: FocusTimer, tasks: List<Task>, onTasks: () 
                 SecondaryAction(if (phase == "break") "结束休息" else "结束本轮", { timer.finish(); onChanged() }, Modifier.weight(1f))
             }
         }
-        Text(
-            when {
-                phase == "break" -> "休息时间不计入任务专注时长"
-                activeTask && selected != null -> "专注时间会计入「${selected.title}」"
-                selected == null -> "先在今日任务中安排一项必做任务"
-                else -> "完成后，专注时间会记录到这项任务"
-            },
-            color = AppColors.Quiet,
-            style = MaterialTheme.typography.bodySmall,
-            textAlign = TextAlign.Center,
-        )
         if (selected == null) SecondaryAction("前往今日任务", onTasks)
     }
 }

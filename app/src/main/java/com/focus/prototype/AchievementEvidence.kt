@@ -48,7 +48,7 @@ internal fun loadAchievementEvidence(db: Database, item: Achievement): Achieveme
 internal fun queryTaskEvidence(db: Database, target: Int): AchievementEvidence.TaskList {
     val tasks = mutableListOf<EvidenceTask>()
     db.readableDatabase.rawQuery(
-        "SELECT id, title, day, completed_at, elapsed FROM tasks WHERE done=1 AND id NOT IN (SELECT source_id FROM task_moves) ORDER BY day ASC, rowid ASC",
+        "SELECT id, title, day, completed_at, elapsed FROM tasks WHERE done=1 AND origin!='sleep_system' AND id NOT IN (SELECT source_id FROM task_moves) ORDER BY day ASC, rowid ASC",
         null,
     ).use { cursor ->
         while (cursor.moveToNext()) {
@@ -108,7 +108,7 @@ internal fun queryStreakEvidence(db: Database, target: Int, isEarned: Boolean = 
 internal fun queryFocusEvidence(db: Database, targetMinutes: Int, isEarned: Boolean = false): AchievementEvidence.FocusList {
     val focusByDay = linkedMapOf<String, Long>()
     db.readableDatabase.rawQuery(
-        "SELECT day, COALESCE(SUM(elapsed),0) FROM tasks WHERE id NOT IN (SELECT source_id FROM task_moves) GROUP BY day ORDER BY day",
+        "SELECT day, COALESCE(SUM(elapsed),0) FROM tasks WHERE origin!='sleep_system' AND id NOT IN (SELECT source_id FROM task_moves) GROUP BY day ORDER BY day",
         null,
     ).use { cursor ->
         while (cursor.moveToNext()) {
@@ -117,7 +117,7 @@ internal fun queryFocusEvidence(db: Database, targetMinutes: Int, isEarned: Bool
             if (elapsed > 0) focusByDay[day] = elapsed
         }
     }
-    db.runningTasks().forEach { task ->
+    db.runningTasks().filter { it.origin != "sleep_system" }.forEach { task ->
         val extra = (db.elapsed(task) - task.elapsed).coerceAtLeast(0)
         if (extra > 0) {
             focusByDay[task.date] = (focusByDay[task.date] ?: 0L) + extra

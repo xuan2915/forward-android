@@ -301,10 +301,10 @@ fun ColumnScope.TaskDetailBody(
             Text("完成方式：$completionMode", style = MaterialTheme.typography.bodyMedium, color = AppColors.Muted)
 
             // 4. 实际获得的 XP
-            val contributesXp = task.done && db.readableDatabase.rawQuery("SELECT 1 FROM tasks WHERE id=? AND done=1 AND id NOT IN (SELECT source_id FROM task_moves)", arrayOf(task.id)).use { it.moveToFirst() }
+            val contributesXp = task.done && task.origin != "sleep_system" && db.readableDatabase.rawQuery("SELECT 1 FROM tasks WHERE id=? AND done=1 AND origin!='sleep_system' AND id NOT IN (SELECT source_id FROM task_moves)", arrayOf(task.id)).use { it.moveToFirst() }
             if (contributesXp) {
                 Text("本项实际成长值：+100\u00A0XP", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = AppColors.Accent)
-            } else if (!task.done) {
+            } else if (!task.done && task.origin != "sleep_system") {
                 Text("成长值：未获得（完成可得\u00A0+100\u00A0XP）", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
             }
 
@@ -346,6 +346,41 @@ fun ColumnScope.TaskDetailBody(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("历史完成证明", style = MaterialTheme.typography.titleMedium, color = AppColors.Text)
                     ProofActions(task, db, onChanged)
+                }
+            }
+
+            if (task.title == "按时准备睡眠") {
+                QuietSurface(color = MaterialTheme.colorScheme.surfaceContainer) {
+                    if (!task.done) {
+                        Button(onClick = {
+                            val nowTime = java.time.LocalTime.now().toString().take(5)
+                            db.prepareSleep(nowTime, task.date)
+                            onChanged()
+                            onClose {}
+                        }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                            Text("确认准备就寝（记录当前时间）")
+                        }
+                    } else {
+                        val prepTime = db.sleepPrepareTime(task.date) ?: ""
+                        Text("已记录准备就寝时间：${if (prepTime.isNotBlank()) prepTime else "已完成"}", style = MaterialTheme.typography.bodyMedium, color = AppColors.Accent)
+                    }
+                }
+            } else if (task.title == "按时起床") {
+                QuietSurface(color = MaterialTheme.colorScheme.surfaceContainer) {
+                    if (!task.done) {
+                        Button(onClick = {
+                            val wakeTime = java.time.LocalTime.now().toString().take(5)
+                            db.confirmWake(wakeTime, cycleDate = task.date)
+                            onChanged()
+                            onClose {}
+                        }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                            Text("记录起床时间")
+                        }
+                    } else {
+                        val rec = db.sleepRecord(task.date)
+                        Text(if (rec != null) "已结算：入睡 ${rec.bedtime} · 起床 ${rec.wakeTime} · 时长 ${rec.durationMinutes / 60}小时${rec.durationMinutes % 60}分 · 状态 ${rec.status}" else "已确认起床",
+                            style = MaterialTheme.typography.bodyMedium, color = AppColors.Accent)
+                    }
                 }
             }
 
