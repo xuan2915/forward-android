@@ -55,6 +55,7 @@ data class EmergencyUnlockStats(
 )
 
 class Database(context: Context, name:String = "journey.db", private val wallNow:()->Long = { System.currentTimeMillis() }, private val now:()->LocalDateTime = { LocalDateTime.now() }) : SQLiteOpenHelper(context, name, null, 8), java.io.Closeable {
+ internal val appContext: Context = context.applicationContext
  override fun onCreate(db: SQLiteDatabase) {
   db.execSQL("CREATE TABLE contracts(day TEXT PRIMARY KEY, confirmed INTEGER NOT NULL DEFAULT 0, rest INTEGER NOT NULL DEFAULT 0, base_minutes INTEGER NOT NULL DEFAULT 30, base_games INTEGER NOT NULL DEFAULT 0, base_claimed INTEGER NOT NULL DEFAULT 0, emergency INTEGER NOT NULL DEFAULT 0, boundary INTEGER NOT NULL DEFAULT 4)")
   db.execSQL("CREATE TABLE tasks(id TEXT PRIMARY KEY, day TEXT NOT NULL, title TEXT NOT NULL, required INTEGER NOT NULL, minutes INTEGER NOT NULL, mode TEXT NOT NULL, checklist TEXT NOT NULL, reward_minutes INTEGER NOT NULL, reward_games INTEGER NOT NULL, elapsed INTEGER NOT NULL DEFAULT 0, running_since INTEGER NOT NULL DEFAULT 0, boot_time INTEGER NOT NULL DEFAULT 0, evidence TEXT NOT NULL DEFAULT '', done INTEGER NOT NULL DEFAULT 0, claimed INTEGER NOT NULL DEFAULT 0, recurrence TEXT NOT NULL DEFAULT 'once', origin TEXT NOT NULL DEFAULT '', completed_at INTEGER NOT NULL DEFAULT 0)")
@@ -71,6 +72,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   upgradeEmergencyUnlocks(db)
   upgradeXpLedger(db)
   upgradeAchievements(db)
+  upgradeMonthlyChallenges(db)
  }
  override fun onOpen(db: SQLiteDatabase) {
   super.onOpen(db)
@@ -78,6 +80,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   upgradeEmergencyUnlocks(db)
   upgradeXpLedger(db)
   upgradeAchievements(db)
+  upgradeMonthlyChallenges(db)
  }
  override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
   if(oldVersion<2) upgradeTemplates(db)
@@ -101,6 +104,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   upgradeEmergencyUnlocks(db)
   upgradeXpLedger(db)
   upgradeAchievements(db)
+  upgradeMonthlyChallenges(db)
  }
  private fun upgradeLedger(db: SQLiteDatabase) {
   val existing = mutableSetOf<String>()
@@ -1272,7 +1276,12 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   AchievementEngine.initSchema(db)
  }
 
+ private fun upgradeMonthlyChallenges(db: SQLiteDatabase) {
+  MonthlyChallengeEngine.initSchema(db)
+ }
+
  fun achievementEngine(): AchievementEngine = AchievementEngine(this)
+ fun monthlyChallengeEngine(): MonthlyChallengeEngine = MonthlyChallengeEngine(this)
  fun streak(): Int {
   val states=history().toMap();var d=LocalDate.parse(day());var count=0
   if(states[d.toString()]!="完成")d=d.minusDays(1)

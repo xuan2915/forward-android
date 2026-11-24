@@ -4,7 +4,9 @@ import android.content.ContentValues
 import android.database.sqlite.SQLiteDatabase
 import org.json.JSONObject
 import java.time.LocalDate
+import java.time.Instant
 import java.time.YearMonth
+import java.time.ZoneId
 import java.time.DayOfWeek
 import java.time.temporal.TemporalAdjusters
 import java.util.UUID
@@ -80,6 +82,8 @@ class AchievementEngine(private val db: Database) {
             "quiet_week_days", "reclaimed_days", "immersion_hours",
             "consecutive_12_weeks", "rebuilt_streak_days", "double_milestones",
             "post_max_days", "first_year_days", "collection_count",
+            "medium_monthly_challenges", "unique_theme_challenges",
+            "consecutive_season_challenges", "annual_chapters", "explore_challenges",
         )
 
         internal fun supportsAvailable(item: AchievementDefinition): Boolean = when (item.metric) {
@@ -99,6 +103,11 @@ class AchievementEngine(private val db: Database) {
             "post_max_days" -> item.id == "achievement.secret.everything_as_usual"
             "first_year_days" -> item.id == "achievement.secret.already_so_long"
             "collection_count" -> item.id == "achievement.secret.closet_of_stories"
+            "medium_monthly_challenges" -> item.id == "achievement.challenge.monthly.not_just_trying"
+            "unique_theme_challenges" -> item.id == "achievement.challenge.monthly.not_by_luck"
+            "consecutive_season_challenges" -> item.id == "achievement.challenge.monthly.whole_season"
+            "annual_chapters" -> item.id == "achievement.challenge.monthly.twelve_chapters"
+            "explore_challenges" -> item.id == "achievement.challenge.explore.little_adventure"
             else -> false
         }
 
@@ -242,6 +251,7 @@ class AchievementEngine(private val db: Database) {
 
             val (isMet, dateAchieved, evidenceJson) = evaluateCondition(
                 item = item,
+                sql = sql,
                 completedTaskDates = completedTaskDates,
                 electiveTaskDates = electiveTaskDates,
                 allClearDates = allClearDates,
@@ -413,8 +423,116 @@ class AchievementEngine(private val db: Database) {
         return null
     }
 
+    private data class CompletedChallengeFact(
+        val instanceId: String,
+        val cycleId: String,
+        val templateId: String,
+        val category: String,
+        val difficulty: String,
+        val completedAt: Long,
+    )
+
+    private fun completedChallengeFacts(sql: SQLiteDatabase): List<CompletedChallengeFact> {
+        val facts = mutableListOf<CompletedChallengeFact>()
+        sql.rawQuery(
+            """
+            SELECT i.instance_id, i.cycle_id, i.template_id, i.template_snapshot, i.difficulty, i.completed_at
+            FROM challenge_instances i
+            JOIN challenge_rewards r ON r.instance_id = i.instance_id AND r.reward_type = 'XP' AND r.grant_status = 'GRANTED'
+            JOIN xp_ledger x ON x.source_type = 'challenge' AND x.source_id = i.instance_id
+                AND x.idempotency_key = r.idempotency_key AND x.status = 'ACTIVE'
+            WHERE i.status = 'COMPLETED'
+              AND NOT EXISTS (
+                SELECT 1 FROM challenge_milestones m
+                WHERE m.instance_id = i.instance_id AND m.required = 1
+                  AND (m.status <> 'COMPLETED' OR TRIM(m.verification_notes) = '')
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM challenge_milestones m
+                WHERE m.instance_id = i.instance_id AND m.required = 1
+                  AND NOT EXISTS (
+                    SELECT 1 FROM challenge_evidences e
+                    WHERE e.instance_id = i.instance_id AND e.milestone_id = m.milestone_id
+                      AND e.verification_status = 'VERIFIED' AND e.action_occurred_at <= i.deadline
+                  )
+              )
+            ORDER BY i.completed_at ASC
+            """.trimIndent(),
+            null,
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val snapshot = runCatching { JSONObject(cursor.getString(3)) }.getOrNull()
+                facts.add(
+                    CompletedChallengeFact(
+                        instanceId = cursor.getString(0),
+                        cycleId = cursor.getString(1),
+                        templateId = cursor.getString(2),
+                        category = snapshot?.optString("category").orEmpty(),
+                        difficulty = cursor.getString(4),
+                        completedAt = cursor.getLong(5),
+                    ),
+                )
+            }
+        }
+        return facts
+    }
+
+    private fun evaluateChallengeCondition(
+        item: AchievementDefinition,
+        facts: List<CompletedChallengeFact>,
+        today: String,
+    ): Triple<Boolean, String?, String> {
+        fun pass(date: String, metric: String, value: Any): Triple<Boolean, String?, String> =
+            Triple(true, date, JSONObject().put(metric, value).put("achievementId", item.id).toString())
+
+        fun dateOf(fact: CompletedChallengeFact): String =
+            Instant.ofEpochMilli(fact.completedAt).atZone(ZoneId.systemDefault()).toLocalDate().toString()
+
+        when (item.id) {
+            "achievement.challenge.monthly.not_just_trying" -> facts.firstOrNull {
+                it.difficulty in setOf("BREAKTHROUGH", "LIMIT")
+            }?.let { return pass(dateOf(it), "qualifiedChallenge", it.instanceId) }
+
+            "achievement.challenge.monthly.not_by_luck" -> {
+                val seen = mutableSetOf<String>()
+                for (fact in facts) {
+                    seen.add(fact.templateId)
+                    if (seen.size >= item.threshold.toInt()) return pass(dateOf(fact), "distinctTemplates", seen.size)
+                }
+            }
+
+            "achievement.challenge.monthly.whole_season" -> {
+                val completedByMonth = facts.groupBy { YearMonth.parse(it.cycleId) }.toSortedMap()
+                var previous: YearMonth? = null
+                var run = 0
+                for ((month, monthFacts) in completedByMonth) {
+                    run = if (previous?.plusMonths(1) == month) run + 1 else 1
+                    if (run >= item.threshold.toInt()) {
+                        val fact = monthFacts.minBy { it.completedAt }
+                        return pass(dateOf(fact), "consecutiveCompletedMonths", run)
+                    }
+                    previous = month
+                }
+            }
+
+            "achievement.challenge.monthly.twelve_chapters" -> {
+                val seen = mutableSetOf<String>()
+                for (fact in facts) {
+                    seen.add(fact.cycleId)
+                    if (seen.size >= item.threshold.toInt()) return pass(dateOf(fact), "completedCycles", seen.size)
+                }
+            }
+
+            "achievement.challenge.explore.little_adventure" -> facts.firstOrNull {
+                it.category == ChallengeCategory.LIFE_EXPLORATION.name
+            }?.let { return pass(dateOf(it), "explorationChallenge", it.instanceId) }
+        }
+        return Triple(false, null, JSONObject().put("challengeEvidence", "not_met").put("date", today).toString())
+    }
+
     private fun evaluateCondition(
         item: AchievementDefinition,
+        sql: SQLiteDatabase,
         completedTaskDates: List<String>,
         electiveTaskDates: List<String>,
         allClearDates: List<String>,
@@ -427,6 +545,9 @@ class AchievementEngine(private val db: Database) {
         existingUnlocks: Map<String, String>,
         today: String,
     ): Triple<Boolean, String?, String> {
+        if (item.kind == AchievementKind.CHALLENGE) {
+            return evaluateChallengeCondition(item, completedChallengeFacts(sql), today)
+        }
         when (item.id) {
             // 01 行动的故事 (tasks completed)
             "achievement.evolution.action.stage_1",

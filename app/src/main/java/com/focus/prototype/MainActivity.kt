@@ -133,7 +133,17 @@ class MainActivity : ComponentActivity() {
   if(receiveText(intent)) shareVersion++
   refresh++
  }
- override fun onResume() { super.onResume(); refresh++;runCatching { Database(this).use { NightWrapUpScheduler.reschedule(this,it) } };requestSleepSync("foreground") }
+ override fun onResume() {
+  super.onResume()
+  refresh++
+  runCatching {
+   Database(this).use { database ->
+    MonthlyChallengeAppLifecycle.onForeground(this, database)
+    NightWrapUpScheduler.reschedule(this, database)
+   }
+  }
+  requestSleepSync("foreground")
+ }
  override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState)
   val initialNavigation = resolveInitialNavigation(
    action = intent.action,

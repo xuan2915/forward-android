@@ -29,7 +29,7 @@ internal data class BackupPreview(
 object Backup {
     private const val FORMAT = "xiangqian-local-backup"
     private const val CURRENT_VERSION = 5
-    private val tables = listOf("contracts", "tasks", "task_moves", "ledger", "reviews", "audit", "settings", "templates", "attachments", "night_violations", "emergency_unlocks", "xp_ledger", "achievement_unlocks", "achievement_reconcile_logs")
+    private val tables = listOf("contracts", "tasks", "task_moves", "ledger", "reviews", "audit", "settings", "templates", "attachments", "night_violations", "emergency_unlocks", "xp_ledger", "achievement_unlocks", "achievement_reconcile_logs", "challenge_instances", "challenge_milestones", "challenge_evidences", "challenge_events", "challenge_rewards")
     private val requiredTables = listOf("contracts", "tasks", "ledger", "reviews", "audit", "settings")
 
     private data class Asset(val key: String, val name: String, val bytes: ByteArray)
@@ -226,6 +226,7 @@ object Backup {
                 if (!parsed.data.has("attachments")) db.seedAttachments(sql)
                 if (!parsed.data.has("xp_ledger")) XpLedger.seedFromExistingTasks(sql)
                 if (!parsed.data.has("achievement_unlocks")) AchievementEngine.initSchema(sql)
+                if (!parsed.data.has("challenge_instances")) MonthlyChallengeEngine.initSchema(sql)
                 sql.setTransactionSuccessful()
             } finally {
                 sql.endTransaction()
@@ -316,6 +317,53 @@ object Backup {
             for (index in 0 until rows.length()) {
                 val row = rows.getJSONObject(index)
                 row.keys().forEach { key -> require(key in columns) { "备份包含当前版本不支持的字段：$table.$key" } }
+            }
+        }
+        validateChallengeReferences(data)
+    }
+
+    private fun validateChallengeReferences(data: JSONObject) {
+        val instances = data.optJSONArray("challenge_instances") ?: return
+        val instanceIds = (0 until instances.length()).map { instances.getJSONObject(it).getString("instance_id") }.toSet()
+        val milestones = mutableMapOf<String, String>()
+        val milestoneRows = data.optJSONArray("challenge_milestones") ?: JSONArray()
+        for (index in 0 until milestoneRows.length()) {
+            val row = milestoneRows.getJSONObject(index)
+            val instanceId = row.getString("instance_id")
+            require(instanceId in instanceIds) { "挑战里程碑缺少所属实例" }
+            require(milestones.put(row.getString("milestone_id"), instanceId) == null) { "挑战里程碑 ID 重复" }
+        }
+
+        val evidenceRows = data.optJSONArray("challenge_evidences") ?: JSONArray()
+        for (index in 0 until evidenceRows.length()) {
+            val row = evidenceRows.getJSONObject(index)
+            val instanceId = row.getString("instance_id")
+            require(instanceId in instanceIds && milestones[row.getString("milestone_id")] == instanceId) {
+                "挑战证据引用了不存在或不属于该实例的里程碑"
+            }
+        }
+
+        for (table in listOf("challenge_events", "challenge_rewards")) {
+            val rows = data.optJSONArray(table) ?: JSONArray()
+            for (index in 0 until rows.length()) {
+                require(rows.getJSONObject(index).getString("instance_id") in instanceIds) {
+                    "挑战记录引用了不存在的实例：$table"
+                }
+            }
+        }
+
+        val xpRows = data.optJSONArray("xp_ledger") ?: JSONArray()
+        val challengeXp = (0 until xpRows.length()).map { xpRows.getJSONObject(it) }
+            .filter { it.optString("source_type") == XpLedger.SOURCE_CHALLENGE }
+            .associateBy { it.optString("source_id") }
+        val rewards = data.optJSONArray("challenge_rewards") ?: JSONArray()
+        for (index in 0 until rewards.length()) {
+            val reward = rewards.getJSONObject(index)
+            if (reward.optString("grant_status") == "GRANTED") {
+                val xp = challengeXp[reward.getString("instance_id")]
+                require(xp != null && xp.optString("idempotency_key") == reward.optString("idempotency_key")) {
+                    "已发挑战经验的备份缺少对应的统一 XP 账本记录"
+                }
             }
         }
     }
