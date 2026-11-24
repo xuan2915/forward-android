@@ -29,7 +29,7 @@ internal data class BackupPreview(
 object Backup {
     private const val FORMAT = "xiangqian-local-backup"
     private const val CURRENT_VERSION = 5
-    private val tables = listOf("contracts", "tasks", "task_moves", "ledger", "reviews", "audit", "settings", "templates", "attachments", "night_violations")
+    private val tables = listOf("contracts", "tasks", "task_moves", "ledger", "reviews", "audit", "settings", "templates", "attachments", "night_violations", "emergency_unlocks")
     private val requiredTables = listOf("contracts", "tasks", "ledger", "reviews", "audit", "settings")
 
     private data class Asset(val key: String, val name: String, val bytes: ByteArray)

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.OutcomeReceiver
+import android.util.Log
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
@@ -13,6 +14,22 @@ import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+
+internal data class SleepRecordsPage<T>(
+    val records: List<T>,
+    val nextPageToken: Long
+)
+
+internal fun <T> readAllSleepRecordPages(fetchPage: (Long?) -> SleepRecordsPage<T>): List<T> {
+    val records = mutableListOf<T>()
+    var pageToken: Long? = null
+    do {
+        val page = fetchPage(pageToken)
+        records += page.records
+        pageToken = page.nextPageToken.takeUnless { it == -1L }
+    } while (pageToken != null)
+    return records
+}
 
 data class RawSleepStage(
     val startTime: Instant,
@@ -102,33 +119,40 @@ class HealthConnectSleepSource : SleepDataSource {
             .setStartTime(start)
             .setEndTime(end)
             .build()
-        val request = android.health.connect.ReadRecordsRequestUsingFilters.Builder(
-            android.health.connect.datatypes.SleepSessionRecord::class.java
-        )
-            .setTimeRangeFilter(timeFilter)
-            .setAscending(true)
-            .build()
-
-        val future = CompletableFuture<List<android.health.connect.datatypes.SleepSessionRecord>>()
         val executor = Executors.newSingleThreadExecutor()
         try {
-            manager.readRecords(
-                request,
-                executor,
-                object : OutcomeReceiver<
-                    android.health.connect.ReadRecordsResponse<android.health.connect.datatypes.SleepSessionRecord>,
-                    android.health.connect.HealthConnectException
-                > {
-                    override fun onResult(response: android.health.connect.ReadRecordsResponse<android.health.connect.datatypes.SleepSessionRecord>) {
-                        future.complete(response.records)
-                    }
-
-                    override fun onError(error: android.health.connect.HealthConnectException) {
-                        future.completeExceptionally(error)
-                    }
+            var pageCount = 0
+            val records = readAllSleepRecordPages { pageToken ->
+                pageCount++
+                val requestBuilder = android.health.connect.ReadRecordsRequestUsingFilters.Builder(
+                    android.health.connect.datatypes.SleepSessionRecord::class.java
+                ).setTimeRangeFilter(timeFilter)
+                if (pageToken == null) {
+                    requestBuilder.setAscending(true)
+                } else {
+                    requestBuilder.setPageToken(pageToken)
                 }
-            )
-            val records = future.get(5, TimeUnit.SECONDS)
+                val future = CompletableFuture<android.health.connect.ReadRecordsResponse<android.health.connect.datatypes.SleepSessionRecord>>()
+                manager.readRecords(
+                    requestBuilder.build(),
+                    executor,
+                    object : OutcomeReceiver<
+                        android.health.connect.ReadRecordsResponse<android.health.connect.datatypes.SleepSessionRecord>,
+                        android.health.connect.HealthConnectException
+                    > {
+                        override fun onResult(response: android.health.connect.ReadRecordsResponse<android.health.connect.datatypes.SleepSessionRecord>) {
+                            future.complete(response)
+                        }
+
+                        override fun onError(error: android.health.connect.HealthConnectException) {
+                            future.completeExceptionally(error)
+                        }
+                    }
+                )
+                val response = future.get(5, TimeUnit.SECONDS)
+                SleepRecordsPage(response.records.toList(), response.nextPageToken)
+            }
+            if (BuildConfig.DEBUG) Log.d("SleepImport", "Health Connect read pages=$pageCount sessions=${records.size}")
 
             for (rec in records) {
                 val stages = rec.stages.map { stage ->
@@ -188,6 +212,7 @@ class MockSleepDataSource(
 object SleepImportManager {
     var activeSource: SleepDataSource = HealthConnectSleepSource()
 
+    @Synchronized
     fun syncFromAvailableSources(
         context: Context,
         db: Database,
@@ -216,6 +241,7 @@ object SleepImportManager {
             source.fetchSleepSessions(context, start, now)
         } catch (e: Throwable) {
             val rootMsg = e.cause?.message ?: e.message ?: "未知异常"
+            if (BuildConfig.DEBUG) Log.w("SleepImport", "Sleep read failed (${e.javaClass.simpleName})")
             // 保留既有睡眠记录和奖惩状态，绝不调用任何变更 DB 的方法
             return ImportResult(
                 status = status,
@@ -225,6 +251,7 @@ object SleepImportManager {
         }
 
         if (rawRecords.isEmpty()) {
+            if (BuildConfig.DEBUG && source.id == "healthconnect") Log.d("SleepImport", "No sleep sessions found in the lookback window")
             val lastSyncStr = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(LocalDateTime.now())
             db.setSetting("sleep_import_last_sync_time", lastSyncStr)
             return ImportResult(
@@ -341,6 +368,9 @@ object SleepImportManager {
         db.setSetting("sleep_import_last_sync_time", lastSyncStr)
 
         val outcome = if (imported > 0) ImportOutcome.SUCCESS_IMPORTED else ImportOutcome.ALREADY_UP_TO_DATE
+        if (BuildConfig.DEBUG && source.id == "healthconnect") {
+            Log.d("SleepImport", "Import outcome=$outcome imported=$imported skipped=$skipped conflicts=$conflicts")
+        }
         val statusDesc = when (lastImportedStatus) {
             SleepStatus.PASS -> "达标"
             SleepStatus.FAIL -> "未达标"

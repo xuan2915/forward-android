@@ -133,6 +133,7 @@ fun DurationNumberInputBox(
     val density = LocalDensity.current
     val fontScale = density.fontScale
     val inputWidth = (28.dp * fontScale.coerceIn(1f, 1.8f)).coerceAtLeast(28.dp)
+    val inputHeight = 28.dp * fontScale.coerceIn(1f, 1.8f)
 
     Row(
         modifier = modifier
@@ -146,26 +147,31 @@ fun DurationNumberInputBox(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
     ) {
-        BasicTextField(
-            value = valueText,
-            onValueChange = { newText ->
-                val digits = newText.filter(Char::isDigit).take(2)
-                onValueTextChange(digits)
-            },
-            modifier = Modifier.width(inputWidth),
-            textStyle = MaterialTheme.typography.titleMedium.copy(
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 16.sp,
-                textAlign = TextAlign.Center,
-                color = AppColors.Text
-            ),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Number,
-                imeAction = ImeAction.Done
-            ),
-            cursorBrush = SolidColor(AppColors.Accent)
-        )
+        Box(
+            modifier = Modifier.width(inputWidth).height(inputHeight),
+            contentAlignment = Alignment.Center
+        ) {
+            BasicTextField(
+                value = valueText,
+                onValueChange = { newText ->
+                    val digits = newText.filter(Char::isDigit).take(2)
+                    onValueTextChange(digits)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                textStyle = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                    textAlign = TextAlign.Center,
+                    color = AppColors.Text
+                ),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Done
+                ),
+                cursorBrush = SolidColor(AppColors.Accent)
+            )
+        }
         Spacer(Modifier.width(4.dp))
         Text(
             text = unitLabel,
@@ -257,6 +263,9 @@ fun WheelColumn(
                     position.snapTo(released)
                     dragging = false
                     dragDeltaPx = 0f
+                    val releasedIndex = released.roundToInt().coerceIn(0, maxIndex)
+                    lastEmittedIndex = releasedIndex
+                    currentCallback(releasedIndex)
 
                     val initialVelocity = (-velocityPxPerSecond / itemHeightPx).coerceIn(-WheelMaxVelocity, WheelMaxVelocity)
                     val speed = abs(initialVelocity)
@@ -269,23 +278,25 @@ fun WheelColumn(
                         Log.d("DurationWheel", "release vItemsPerSec=${"%.1f".format(initialVelocity)} from=${"%.2f".format(released)} capItems=$maxTravel target=${"%.2f".format(limitedTarget)}")
                     }
 
-                    if (!reducedMotion && speed >= WheelMinFlingVelocity && abs(limitedTarget - released) >= 0.08f) {
-                        position.updateBounds(lowerBound, upperBound)
-                        position.animateDecay(initialVelocity, decay)
-                    }
+                    coroutineScope.launch {
+                        if (!reducedMotion && speed >= WheelMinFlingVelocity && abs(limitedTarget - released) >= 0.08f) {
+                            position.updateBounds(lowerBound, upperBound)
+                            position.animateDecay(initialVelocity, decay)
+                        }
 
-                    val snappedIndex = position.value.roundToInt().coerceIn(0, maxIndex)
-                    position.updateBounds(-WheelOverscroll, maxIndex + WheelOverscroll)
-                    if (reducedMotion) {
-                        position.snapTo(snappedIndex.toFloat())
-                    } else {
-                        position.animateTo(
-                            snappedIndex.toFloat(),
-                            spring(dampingRatio = 0.78f, stiffness = 620f)
-                        )
+                        val snappedIndex = position.value.roundToInt().coerceIn(0, maxIndex)
+                        position.updateBounds(-WheelOverscroll, maxIndex + WheelOverscroll)
+                        if (reducedMotion) {
+                            position.snapTo(snappedIndex.toFloat())
+                        } else {
+                            position.animateTo(
+                                snappedIndex.toFloat(),
+                                spring(dampingRatio = 0.78f, stiffness = 620f)
+                            )
+                        }
+                        position.updateBounds(0f, maxIndex.toFloat())
+                        if (BuildConfig.DEBUG) Log.d("DurationWheel", "settled index=$snappedIndex value=${items.getOrNull(snappedIndex)}")
                     }
-                    position.updateBounds(0f, maxIndex.toFloat())
-                    if (BuildConfig.DEBUG) Log.d("DurationWheel", "settled index=$snappedIndex value=${items.getOrNull(snappedIndex)}")
                 }
             ),
         contentAlignment = Alignment.Center
@@ -326,6 +337,8 @@ fun WheelColumn(
                         .fillMaxWidth()
                         .height(itemHeight)
                         .clickable {
+                            lastEmittedIndex = index
+                            currentCallback(index)
                             coroutineScope.launch {
                                 position.stop()
                                 position.updateBounds(-WheelOverscroll, maxIndex + WheelOverscroll)

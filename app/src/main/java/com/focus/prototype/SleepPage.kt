@@ -28,6 +28,7 @@ import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +47,9 @@ internal fun SleepPage(
     onBack: () -> Unit,
     initialShowRationale: Boolean = false,
     onDismissRationale: (() -> Unit)? = null,
+    latestImportResult: ImportResult? = null,
+    isSyncing: Boolean = false,
+    onRequestSync: (forceAfterCurrent: Boolean) -> Unit = {},
     onChanged: () -> Unit
 ) {
     val context = LocalContext.current
@@ -54,17 +58,26 @@ internal fun SleepPage(
     var targetWake by remember(targets) { mutableStateOf(targets[1]) }
     var sleepTargetMessage by remember { mutableStateOf("") }
     var sleepTargetIsError by remember { mutableStateOf(false) }
+    var restrictionConfig by remember(refreshKey) { mutableStateOf(db.nightWrapUpConfig()) }
+    var restrictionMessage by remember { mutableStateOf("") }
+    var restrictionIsError by remember { mutableStateOf(false) }
 
     var showRecordDialog by remember { mutableStateOf(false) }
     var recordDialogDate by remember { mutableStateOf<String?>(null) }
     var showExemptionDialog by remember { mutableStateOf(false) }
     var showRationaleDialog by remember(initialShowRationale) { mutableStateOf(initialShowRationale) }
     var lastImportResult by remember { mutableStateOf<ImportResult?>(null) }
-    var syncMessage by remember { mutableStateOf("") }
+
+    LaunchedEffect(latestImportResult) {
+        latestImportResult?.let {
+            lastImportResult = it
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
+        if (isGranted) onRequestSync(true)
         onChanged()
     }
 
@@ -138,7 +151,7 @@ internal fun SleepPage(
             val nextDayGamePenalty = db.pendingSleepPenalty("game")
             if (nextDayVideoPenalty > 0 || nextDayGamePenalty > 0) {
                 Text(
-                    "次日扣减娱乐 $nextDayVideoPenalty 分钟" +
+                    "待抵扣娱乐 $nextDayVideoPenalty 分钟" +
                             (if (nextDayGamePenalty > 0) "、$nextDayGamePenalty 局" else ""),
                     style = MaterialTheme.typography.bodySmall,
                     color = AppColors.Warning
@@ -218,14 +231,12 @@ internal fun SleepPage(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
-                            val res = SleepImportManager.syncFromAvailableSources(context, db)
-                            lastImportResult = res
-                            syncMessage = res.message
-                            onChanged()
+                            onRequestSync(false)
                         },
-                        modifier = Modifier.weight(1f).heightIn(min = 44.dp)
+                        modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                        enabled = !isSyncing
                     ) {
-                        Text("立即同步")
+                        Text(if (isSyncing) "同步中" else "立即同步")
                     }
                     OutlinedButton(
                         onClick = { showRationaleDialog = true },
@@ -421,6 +432,44 @@ internal fun SleepPage(
                 ) {
                     Text("申请豁免")
                 }
+            }
+        }
+
+        QuietSurface {
+            Text("受限应用时段", style = MaterialTheme.typography.titleMedium)
+            SleepTimeRow("娱乐截止", restrictionConfig.entertainmentCutoff) {
+                restrictionConfig = restrictionConfig.copy(entertainmentCutoff = it)
+                restrictionMessage = ""
+            }
+            SleepTimeRow("早晨解除限制", restrictionConfig.morningRelease) {
+                restrictionConfig = restrictionConfig.copy(morningRelease = it)
+                restrictionMessage = ""
+            }
+            Button(
+                onClick = {
+                    runCatching {
+                        restrictionConfig.validate()
+                        db.saveNightWrapUpConfig(restrictionConfig)
+                        NightWrapUpScheduler.reschedule(context, db)
+                    }.onSuccess {
+                        restrictionMessage = "已保存"
+                        restrictionIsError = false
+                        onChanged()
+                    }.onFailure {
+                        restrictionMessage = it.message ?: "保存失败"
+                        restrictionIsError = true
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            ) {
+                Text("保存时段")
+            }
+            if (restrictionMessage.isNotBlank()) {
+                Text(
+                    restrictionMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (restrictionIsError) AppColors.Warning else AppColors.Accent
+                )
             }
         }
     }

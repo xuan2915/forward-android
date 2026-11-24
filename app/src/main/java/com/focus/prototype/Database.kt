@@ -35,6 +35,24 @@ data class SleepRecord(
 )
 data class RewardSnapshot(val earned:Long,val used:Long,val sleepDeducted:Long,val expired:Long,val reversed:Long,val remaining:Long,val nightDeducted:Long=0L)
 data class GrowthPeriodStats(val planDays:Int,val achievedDays:Int,val weekPlanDays:Int,val weekAchievedDays:Int,val focusMillis:Long)
+data class EmergencyUnlockRecord(
+ val id: String,
+ val packageName: String,
+ val reason: String,
+ val requestedAt: Long,
+ val startedAt: Long,
+ val durationMinutes: Int,
+ val expiresAt: Long,
+ val status: String
+)
+data class EmergencyUnlockStats(
+ val used24h: Int,
+ val limit24h: Int = 1,
+ val used168h: Int,
+ val limit168h: Int = 3,
+ val canUnlock: Boolean,
+ val rejectReason: String? = null
+)
 
 class Database(context: Context, name:String = "journey.db", private val wallNow:()->Long = { System.currentTimeMillis() }, private val now:()->LocalDateTime = { LocalDateTime.now() }) : SQLiteOpenHelper(context, name, null, 8), java.io.Closeable {
  override fun onCreate(db: SQLiteDatabase) {
@@ -50,10 +68,12 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   upgradeAttachments(db)
   upgradeHistory(db)
   upgradeLedger(db)
+  upgradeEmergencyUnlocks(db)
  }
  override fun onOpen(db: SQLiteDatabase) {
   super.onOpen(db)
   upgradeLedger(db)
+  upgradeEmergencyUnlocks(db)
  }
  override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
   if(oldVersion<2) upgradeTemplates(db)
@@ -244,10 +264,17 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
  fun setDailyEarnCap(kind: String, cap: Long) { setSetting("reward_daily_earn_cap_$kind", cap.toString()) }
  fun dailyUsageCap(kind: String): Long = setting("reward_daily_use_cap_$kind").toLongOrNull() ?: Long.MAX_VALUE
  fun setDailyUsageCap(kind: String, cap: Long) { setSetting("reward_daily_use_cap_$kind", cap.toString()) }
- fun consumedOnDate(db: SQLiteDatabase = readableDatabase, date: String, kind: String): Long = db.rawQuery(
-  "SELECT COALESCE(-SUM(amount), 0) FROM ledger WHERE kind=? AND task_id='usage' AND (consumption_day=? OR (consumption_day IS NULL AND day=?))",
-  arrayOf(kind, date, date)
- ).use { if (it.moveToFirst()) it.getLong(0) else 0L }
+ fun consumedOnDate(db: SQLiteDatabase = readableDatabase, date: String, kind: String): Long {
+  val rewardUsage = db.rawQuery(
+   "SELECT COALESCE(-SUM(amount), 0) FROM ledger WHERE kind=? AND task_id='usage' AND (consumption_day=? OR (consumption_day IS NULL AND day=?))",
+   arrayOf(kind, date, date)
+  ).use { if (it.moveToFirst()) it.getLong(0) else 0L }
+  val emergencyUsage = db.rawQuery(
+   "SELECT CAST(value AS INTEGER) FROM settings WHERE key=?",
+   arrayOf("emergency_usage_${kind}_$date")
+  ).use { if (it.moveToFirst()) it.getLong(0) else 0L }
+  return (rewardUsage + emergencyUsage).coerceAtLeast(0L)
+ }
  fun activeBatchesSortedByExpiry(db: SQLiteDatabase = readableDatabase, kind: String): List<String> {
   val batches = mutableListOf<String>()
   db.rawQuery("SELECT day, SUM(amount) FROM ledger WHERE kind=? GROUP BY day HAVING SUM(amount)>0", arrayOf(kind)).use { c ->
@@ -347,7 +374,6 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
     available-=charged
    }
   }
-  applyPendingNightPenalty(db,date,source,kind,available)
   val earnCap = dailyEarnCap(kind)
   if(earnCap < Long.MAX_VALUE) {
    val netSoFar = db.rawQuery("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE day=? AND kind=? AND task_id NOT IN ('usage','expiry')", arrayOf(date, kind)).use { it.moveToFirst(); it.getLong(0) }
@@ -358,20 +384,6 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
     allocateSpend(db, date, kind, excess, at)
     audit(date, "超出每日获取上限，扣减 $kind 额度：$excess")
    }
-  }
- }
- private fun applyPendingNightPenalty(db:SQLiteDatabase,date:String,source:String,kind:String,initialAvailable:Long) {
-  var available=initialAvailable
-  val pending=mutableListOf<Pair<String,Long>>()
-  val suffix=if(kind=="video")"video_" else "game_"
-  db.rawQuery("SELECT key,value FROM settings WHERE key GLOB ? AND CAST(value AS INTEGER)>0",arrayOf("night_pending_$suffix*")).use { c -> while(c.moveToNext())pending.add(c.getString(0).removePrefix("night_pending_$suffix") to c.getString(1).toLong()) }
-  pending.sortedBy{it.first}.forEach { (nightDate,due) ->
-   if(available<=0)return@forEach
-   val charged=minOf(available,due)
-   ledger(db,date,"night:$kind:$nightDate:$source",kind,-charged)
-   ledger(db,date,source,allocationKind(kind),-charged)
-   setSetting("night_pending_$suffix$nightDate",(due-charged).toString())
-   available-=charged
   }
  }
  private fun appendDebit(db:SQLiteDatabase,day:String,source:String,kind:String,amount:Long,at:Long,consumptionDay:String?=null) {
@@ -457,14 +469,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    val values=cv("id" to eventId,"cycle_date" to cycle,"package_name" to packageName,"observed_at" to observedAt,"reserved_minutes" to 0,"reward_kind" to kind,"reserved_amount" to 0L)
    val inserted=sql.insertWithOnConflict("night_violations",null,values,SQLiteDatabase.CONFLICT_IGNORE)
    if(inserted==-1L){sql.setTransactionSuccessful();return false}
-   val key="night_reserved_${kind}_$cycle";val already=setting(key,"0").toIntOrNull()?:0
-   val cap=if(kind=="video")config.penaltyCapMinutes else config.penaltyCapGames
-   val reserved=if(kind=="video") minOf(perEventMinutes,(cap-already).coerceAtLeast(0)) else minOf(1,(cap-already).coerceAtLeast(0))
-   val reservedAmount=if(kind=="video")reserved*60_000L else reserved.toLong()
-   if(reserved>0){sql.update("night_violations",cv("reserved_minutes" to if(kind=="video")reserved else 0,"reserved_amount" to reservedAmount),"id=?",arrayOf(eventId));setSetting(key,(already+reserved).toString());val pendingKey="night_pending_${kind}_$cycle";setSetting(pendingKey,((setting(pendingKey,"0").toLongOrNull()?:0L)+reservedAmount).toString())}
-   val rewardLabel=if(kind=="video")"娱乐分钟" else "游戏局数"
-   val amountLabel=if(kind=="video")"$reserved 分钟" else "$reserved 局"
-   audit(cycle,"夜间娱乐访问已拦截：$packageName"+(if(reserved>0)"；后续${rewardLabel}最多抵扣 $amountLabel" else "；已达到本夜抵扣上限"))
+   audit(cycle,"夜间娱乐访问已拦截：$packageName")
    sql.setTransactionSuccessful();return true
   } finally {sql.endTransaction()}
  }
@@ -775,9 +780,8 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
       val effectiveDate = parts[0]
       val cDate = parts[1]
       if (cycleDate != null && cDate != cycleDate) continue
-      if (date == null || date >= effectiveDate) {
-       v1 += c.getString(1).toLong()
-      }
+      if (date != null && date != effectiveDate) continue
+      v1 += c.getString(1).toLong()
      }
     }
    }
@@ -792,9 +796,8 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
       val effectiveDate = parts[0]
       val cDate = parts[1]
       if (cycleDate != null && cDate != cycleDate) continue
-      if (date == null || date >= effectiveDate) {
-       v1 += c.getString(1).toLong()
-      }
+      if (date != null && date != effectiveDate) continue
+      v1 += c.getString(1).toLong()
      }
     }
    }
@@ -925,7 +928,6 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   try {
    setSetting("sleep_level_$cycleDate", level.toString())
    setSetting("sleep_failure_level", level.toString())
-
    val videoKey = "sleep_pending_video_${effectiveDate}_${cycleDate}"
    val totalRequiredVideo = penaltyMin * 60_000L
    val deductedVideo = db.rawQuery("SELECT COALESCE(-SUM(amount), 0) FROM ledger WHERE (task_id = 'sleep:cycle:' || ? OR task_id LIKE 'sleep:%:' || ?) AND kind='video' AND amount<0", arrayOf(cycleDate, cycleDate)).use {
@@ -1212,4 +1214,198 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   repeat(36500){when(states[d.toString()]){"完成"->count++;"未完成"->return count;else->Unit};d=d.minusDays(1)}
   return count
  }
+
+ private fun upgradeEmergencyUnlocks(db: SQLiteDatabase) {
+  db.execSQL("CREATE TABLE IF NOT EXISTS emergency_unlocks(id TEXT PRIMARY KEY, package_name TEXT NOT NULL, reason TEXT NOT NULL, requested_at INTEGER NOT NULL, started_at INTEGER NOT NULL, duration_minutes INTEGER NOT NULL DEFAULT 10, expires_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'ACTIVE')")
+ }
+
+ fun isDailyUsageCapExhausted(pkg: String): Boolean {
+  val kind = rewardKind(pkg)
+  val usageCap = dailyUsageCap(kind)
+  if (usageCap == Long.MAX_VALUE) return false
+  val today = now().toLocalDate().toString()
+  val consumedToday = consumedOnDate(readableDatabase, today, kind)
+  return consumedToday >= usageCap
+ }
+
+ fun recordEmergencyVideoUsage(pkg: String, elapsedMillis: Long, nowMs: Long = wallNow()): Long {
+  require(rewardKind(pkg) == "video")
+  if (elapsedMillis <= 0L) return 0L
+  val date = now().toLocalDate().toString()
+  val db = writableDatabase
+  db.beginTransaction()
+  try {
+   val cap = dailyUsageCap("video")
+   val consumed = consumedOnDate(db, date, "video")
+   val remaining = (cap - consumed).coerceAtLeast(0L)
+   val recorded = minOf(elapsedMillis, remaining)
+   if (recorded > 0L) {
+    val key = "emergency_usage_video_$date"
+    val previous = setting(key).toLongOrNull() ?: 0L
+    setSetting(key, (previous + recorded).toString())
+   }
+   val left = (remaining - recorded).coerceAtLeast(0L)
+   if (left == 0L) {
+    val ended = db.update(
+     "emergency_unlocks",
+     cv("status" to "ENDED", "expires_at" to nowMs),
+     "package_name=? AND status='ACTIVE'",
+     arrayOf(pkg)
+    )
+    if (ended > 0) audit(date, "紧急解锁已达当日娱乐时长上限")
+   }
+   db.setTransactionSuccessful()
+   return left
+  } finally {
+   db.endTransaction()
+  }
+ }
+
+ fun emergencyUnlockStats(pkg: String? = null, nowMs: Long = wallNow()): EmergencyUnlockStats {
+  val window24hStart = nowMs - 24 * 3600 * 1000L
+  val window168hStart = nowMs - 168 * 3600 * 1000L
+  val db = writableDatabase
+  db.execSQL("UPDATE emergency_unlocks SET status = 'EXPIRED' WHERE status = 'ACTIVE' AND expires_at <= ?", arrayOf(nowMs))
+
+  val used24h = db.rawQuery("SELECT COUNT(*) FROM emergency_unlocks WHERE started_at > ?", arrayOf(window24hStart.toString())).use {
+   if (it.moveToFirst()) it.getInt(0) else 0
+  }
+  val used168h = db.rawQuery("SELECT COUNT(*) FROM emergency_unlocks WHERE started_at > ?", arrayOf(window168hStart.toString())).use {
+   if (it.moveToFirst()) it.getInt(0) else 0
+  }
+
+  val active = activeEmergencyUnlock(nowMs)
+  val usageDate = now().toLocalDate().toString()
+  val (canUnlock, rejectReason) = when {
+   active != null -> false to "当前已有正在进行的紧急解锁（${active.packageName}）"
+   used24h >= 1 -> false to "滚动 24 小时内已使用过紧急解锁（最多 1 次）"
+   used168h >= 3 -> false to "滚动 168 小时（7天）内已使用 3 次紧急解锁（最多 3 次）"
+   pkg != null && dailyUsageCap(rewardKind(pkg)) != Long.MAX_VALUE && consumedOnDate(db, usageDate, rewardKind(pkg)) >= dailyUsageCap(rewardKind(pkg)) -> {
+    val kind = rewardKind(pkg)
+    false to "当日${if (kind == "video") "娱乐时长" else "游戏"}总使用上限已耗尽，无法使用紧急解锁"
+   }
+   else -> true to null
+  }
+  return EmergencyUnlockStats(used24h, 1, used168h, 3, canUnlock, rejectReason)
+ }
+
+ fun canEmergencyUnlock(pkg: String, nowMs: Long = wallNow()): Pair<Boolean, String?> {
+  val stats = emergencyUnlockStats(pkg, nowMs)
+  return stats.canUnlock to stats.rejectReason
+ }
+
+ fun requestEmergencyUnlock(pkg: String, reason: String, durationMinutes: Int = 10, nowMs: Long = wallNow()): EmergencyUnlockRecord {
+  require(pkg.isNotBlank()) { "必须指定一个受控应用" }
+  require(reason.isNotBlank()) { "紧急解锁必须填写原因" }
+  val duration = minOf(10, maxOf(1, durationMinutes))
+  val (can, rejectReason) = canEmergencyUnlock(pkg, nowMs)
+  check(can) { rejectReason ?: "当前无法申请紧急解锁" }
+
+  val id = java.util.UUID.randomUUID().toString()
+  val startedAt = nowMs
+  val expiresAt = startedAt + duration * 60_000L
+  val values = cv(
+   "id" to id,
+   "package_name" to pkg,
+   "reason" to reason.trim(),
+   "requested_at" to nowMs,
+   "started_at" to startedAt,
+   "duration_minutes" to duration,
+   "expires_at" to expiresAt,
+   "status" to "ACTIVE"
+  )
+  writableDatabase.insertOrThrow("emergency_unlocks", null, values)
+  audit(rewardDay(), "紧急解锁生效：$pkg，原因：${reason.trim()}，时长：${duration}分钟")
+  return EmergencyUnlockRecord(id, pkg, reason.trim(), nowMs, startedAt, duration, expiresAt, "ACTIVE")
+ }
+
+ fun isEmergencyUnlocked(pkg: String, nowMs: Long = wallNow()): Boolean {
+  writableDatabase.execSQL("UPDATE emergency_unlocks SET status = 'EXPIRED' WHERE status = 'ACTIVE' AND expires_at <= ?", arrayOf(nowMs))
+  val active = readableDatabase.rawQuery(
+   "SELECT id FROM emergency_unlocks WHERE package_name = ? AND status = 'ACTIVE' AND expires_at > ?",
+   arrayOf(pkg, nowMs.toString())
+  ).use { it.moveToFirst() }
+  if (!active) return false
+  val kind = rewardKind(pkg)
+  val date = now().toLocalDate().toString()
+  if (dailyUsageCap(kind) != Long.MAX_VALUE && consumedOnDate(readableDatabase, date, kind) >= dailyUsageCap(kind)) {
+   writableDatabase.update("emergency_unlocks", cv("status" to "ENDED", "expires_at" to nowMs), "package_name=? AND status='ACTIVE'", arrayOf(pkg))
+   audit(date, "紧急解锁已达当日使用上限")
+   return false
+  }
+  return true
+ }
+
+ fun activeEmergencyUnlock(nowMs: Long = wallNow()): EmergencyUnlockRecord? {
+  writableDatabase.execSQL("UPDATE emergency_unlocks SET status = 'EXPIRED' WHERE status = 'ACTIVE' AND expires_at <= ?", arrayOf(nowMs))
+  val active = readableDatabase.rawQuery(
+   "SELECT id, package_name, reason, requested_at, started_at, duration_minutes, expires_at, status FROM emergency_unlocks WHERE status = 'ACTIVE' AND expires_at > ? ORDER BY started_at DESC LIMIT 1",
+   arrayOf(nowMs.toString())
+  ).use { c ->
+   if (c.moveToFirst()) {
+    EmergencyUnlockRecord(
+     id = c.getString(0),
+     packageName = c.getString(1),
+     reason = c.getString(2),
+     requestedAt = c.getLong(3),
+     startedAt = c.getLong(4),
+     durationMinutes = c.getInt(5),
+     expiresAt = c.getLong(6),
+     status = c.getString(7)
+    )
+   } else null
+  }
+  if (active != null && dailyUsageCap(rewardKind(active.packageName)) != Long.MAX_VALUE) {
+   val date = now().toLocalDate().toString()
+   val cap = dailyUsageCap(rewardKind(active.packageName))
+   if (consumedOnDate(readableDatabase, date, rewardKind(active.packageName)) >= cap) {
+    writableDatabase.update("emergency_unlocks", cv("status" to "ENDED", "expires_at" to nowMs), "id=? AND status='ACTIVE'", arrayOf(active.id))
+    audit(date, "紧急解锁已达当日使用上限")
+    return null
+   }
+  }
+  return active
+ }
+
+ fun endEmergencyUnlock(id: String, nowMs: Long = wallNow()): Boolean {
+  val affected = writableDatabase.update(
+   "emergency_unlocks",
+   cv("status" to "ENDED", "expires_at" to nowMs),
+   "id = ? AND status = 'ACTIVE'",
+   arrayOf(id)
+  )
+  if (affected > 0) {
+   audit(rewardDay(), "提前结束紧急解锁：$id")
+   return true
+  }
+  return false
+ }
+
+ fun emergencyUnlockHistory(limit: Int = 20): List<EmergencyUnlockRecord> {
+  return readableDatabase.rawQuery(
+   "SELECT id, package_name, reason, requested_at, started_at, duration_minutes, expires_at, status FROM emergency_unlocks ORDER BY started_at DESC LIMIT ?",
+   arrayOf(limit.toString())
+  ).use { c ->
+   buildList {
+    while (c.moveToNext()) {
+     add(EmergencyUnlockRecord(
+      id = c.getString(0),
+      packageName = c.getString(1),
+      reason = c.getString(2),
+      requestedAt = c.getLong(3),
+      startedAt = c.getLong(4),
+      durationMinutes = c.getInt(5),
+      expiresAt = c.getLong(6),
+      status = c.getString(7)
+     ))
+    }
+   }
+  }
+ }
+
+ fun stopLearning() {
+  setSetting("learning_until", "0")
+  audit(day(), "结束B站学习窗口")
+ }
+
 }

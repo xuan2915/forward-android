@@ -231,16 +231,18 @@ class FocusService : AccessibilityService() {
         lastTick = now
         val pkg = current ?: return
         if (pkg in store.selected && db.rewardKind(pkg) == "video" && !blockActivityShowing &&
-            !(pkg == "tv.danmaku.bili" && db.learningActive()) && !db.contract().emergency &&
-            db.balance("video") > 0 && (screenJustOff || screenAvailable())) {
-            db.consume("video", elapsed)
+            !(pkg == "tv.danmaku.bili" && db.learningActive()) && (screenJustOff || screenAvailable())) {
+            if (db.isEmergencyUnlocked(pkg)) {
+                db.recordEmergencyVideoUsage(pkg, elapsed)
+            } else if (db.balance("video") > 0) {
+                db.consume("video", elapsed)
+            }
         }
     }
 
     private fun enforce() {
         if (!screenAvailable() || bedtimeDialog?.isShowing == true) return
         val pkg = current ?: return
-        val contract = db.contract()
         if (pkg !in store.selected || !store.canRestrict(pkg)) {
             blockActivityShowing = false
             lastDecision = null
@@ -249,15 +251,16 @@ class FocusService : AccessibilityService() {
         val kind = db.rewardKind(pkg)
         val noAllowance = db.balance(kind) <= 0
         val learningExempt = pkg == "tv.danmaku.bili" && db.learningActive()
-        val nightRestricted = db.nightEntertainmentRestricted() && !contract.emergency && !learningExempt
+        val emergencyUnlocked = db.isEmergencyUnlocked(pkg)
+        val nightRestricted = db.nightEntertainmentRestricted() && !emergencyUnlocked && !learningExempt
         val verifiableNightBlock = nightRestricted
         if (verifiableNightBlock && !nightAttemptRecorded) {
             val cycle = db.nightCycleDate()
             db.recordNightViolation("$cycle|$pkg|${sessionStartedAt.takeIf { it > 0 } ?: System.currentTimeMillis()}", pkg, System.currentTimeMillis())
             nightAttemptRecorded = true
         }
-        val blocked = !contract.emergency && !learningExempt && (noAllowance || nightRestricted)
-        val decision = "$pkg kind=$kind blocked=$blocked night=$nightRestricted exhausted=$noAllowance"
+        val blocked = !emergencyUnlocked && !learningExempt && (noAllowance || nightRestricted)
+        val decision = "$pkg kind=$kind blocked=$blocked night=$nightRestricted exhausted=$noAllowance emergency=$emergencyUnlocked"
         if (BuildConfig.DEBUG && lastDecision != decision) Log.d("ForwardControl", decision)
         lastDecision = decision
         if (blocked) {

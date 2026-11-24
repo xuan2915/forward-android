@@ -30,7 +30,7 @@ class NightWrapUpTest {
         NightWrapUpConfig(windDown = "23:00", workCutoff = "22:30").validate()
     }
 
-    @Test fun interceptedEventIsIdempotentAndDeductedOnlyFromFutureVideoRewards() {
+    @Test fun interceptedEventIsIdempotentWithoutStartingANewNightDeduction() {
         val date = "2026-11-13"
         val time = LocalDateTime.parse("2026-11-13T00:20")
         val observedAt = time.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
@@ -45,8 +45,10 @@ class NightWrapUpTest {
             assertTrue(db.recordNightViolation("game-event-1", "com.tencent.tmgp.sgame", observedAt + 3))
             assertFalse(db.recordNightViolation("game-event-1", "com.tencent.tmgp.sgame", observedAt + 3))
             assertEquals(4, db.nightViolations("2026-11-12").size)
-            assertEquals(10L * 60_000L, db.pendingNightPenalty())
-            assertEquals(1L, db.pendingNightPenalty("game"))
+            assertEquals(0L, db.pendingNightPenalty())
+            assertEquals(0L, db.pendingNightPenalty("game"))
+            db.setSetting("night_pending_video_2026-11-12", (5 * 60_000L).toString())
+            db.setSetting("night_pending_game_2026-11-12", "1")
 
             val taskDate = db.day()
             val title4 = "奖励任务 4 ${System.nanoTime()}"
@@ -57,17 +59,16 @@ class NightWrapUpTest {
             db.addTask(taskDate, titleGame, true, 0, "行动型", "完成", 0, 3, "once")
             db.confirm(taskDate, false, 0, 0)
             db.complete(db.tasks(taskDate).first { it.title == title4 })
-            assertEquals(0L, db.balance("video"))
-            assertEquals(6L * 60_000L, db.pendingNightPenalty())
+            assertEquals(4L * 60_000L, db.balance("video"))
+            assertEquals(5L * 60_000L, db.pendingNightPenalty())
             db.complete(db.tasks(taskDate).first { it.title == title10 })
             db.complete(db.tasks(taskDate).first { it.title == titleGame })
-            assertEquals(4L * 60_000L, db.balance("video"))
-            assertEquals(0L, db.pendingNightPenalty())
-            assertEquals(10L * 60_000L, db.nightDeducted(db.rewardDay()))
-            assertEquals(2L, db.balance("game"))
-            assertEquals(1L, db.nightDeducted(db.rewardDay(), "game"))
-            assertEquals(0L, db.pendingNightPenalty("game"))
-            assertTrue(db.rewardHistory().any { it.contains("夜间收尾抵扣") })
+            assertEquals(14L * 60_000L, db.balance("video"))
+            assertEquals(0L, db.nightDeducted(db.rewardDay()))
+            assertEquals(3L, db.balance("game"))
+            assertEquals(0L, db.nightDeducted(db.rewardDay(), "game"))
+            assertEquals(1L, db.pendingNightPenalty("game"))
+            assertFalse(db.rewardHistory().any { it.contains("夜间收尾抵扣") })
             val backup = Backup.export(context, db)
             assertEquals(4, org.json.JSONObject(org.json.JSONObject(backup).getString("payload")).getJSONObject("data").getJSONArray("night_violations").length())
             db.recordNightViolation("event-after-backup", "com.ss.android.ugc.aweme", observedAt + 4)
@@ -97,7 +98,7 @@ class NightWrapUpTest {
         }
     }
 
-    @Test fun undoingTheRewardThatConsumedNightDebtRestoresTheDebtForTheNextGrant() {
+    @Test fun undoingRewardDoesNotCreateOrRestoreNightDebt() {
         val dateTime = LocalDateTime.parse("2026-11-13T00:20")
         val observedAt = dateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val context = RuntimeEnvironment.getApplication()
@@ -110,16 +111,16 @@ class NightWrapUpTest {
             db.addTask(taskDate, title, true, 0, "行动型", "完成", 5, 0, "once")
             db.confirm(taskDate, false, 0, 0)
             db.complete(db.tasks(taskDate).single { it.title == title })
-            assertEquals(0L, db.balance("video"))
+            assertEquals(5L * 60_000L, db.balance("video"))
             assertEquals(0L, db.pendingNightPenalty())
 
             db.revoke(db.tasks(taskDate).single { it.title == title })
             assertEquals(0L, db.nightDeducted(db.rewardDay()))
-            assertEquals(5L * 60_000L, db.pendingNightPenalty())
-            db.complete(db.tasks(taskDate).single { it.title == title })
-            assertEquals(0L, db.balance("video"))
             assertEquals(0L, db.pendingNightPenalty())
-            assertEquals(5L * 60_000L, db.nightDeducted(db.rewardDay()))
+            db.complete(db.tasks(taskDate).single { it.title == title })
+            assertEquals(5L * 60_000L, db.balance("video"))
+            assertEquals(0L, db.pendingNightPenalty())
+            assertEquals(0L, db.nightDeducted(db.rewardDay()))
         } finally {
             db.close()
             context.deleteDatabase(name)

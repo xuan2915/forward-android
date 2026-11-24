@@ -5,10 +5,12 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.animation.animateContentSize
@@ -37,9 +39,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -47,12 +51,59 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
  companion object {
   const val EXTRA_DESTINATION_PAGE = "destination_page"
+  const val EXTRA_DESTINATION_SECTION = "destination_section"
  }
  private var refresh by mutableIntStateOf(0)
  private var shareVersion by mutableIntStateOf(0)
  private var requestedPage by mutableStateOf<Int?>(null)
  private var requestedSettingsSection by mutableStateOf<String?>(null)
+ private var requestedEmergencyPackage by mutableStateOf<String?>(null)
  private var requestedSleepRationale by mutableStateOf(false)
+ private var appDatabase: Database? = null
+ private var sleepSyncJob: Job? = null
+ private var syncAgainAfterCurrent = false
+ private var sleepSyncBusy by mutableStateOf(false)
+ private var latestSleepImport by mutableStateOf<ImportResult?>(null)
+ private fun requestSleepSync(trigger: String, forceAfterCurrent: Boolean = false) {
+  val database = appDatabase ?: return
+  if (sleepSyncJob?.isActive == true) {
+   if (forceAfterCurrent) {
+    syncAgainAfterCurrent = true
+    if (BuildConfig.DEBUG) Log.d("SleepImport", "Queued a fresh sync after the active read; trigger=$trigger")
+   }
+   return
+  }
+  sleepSyncBusy = true
+  latestSleepImport = null
+  if (BuildConfig.DEBUG) Log.d("SleepImport", "Starting foreground read; trigger=$trigger")
+  sleepSyncJob = lifecycleScope.launch {
+   try {
+    latestSleepImport = withContext(Dispatchers.IO) {
+     SleepImportManager.syncFromAvailableSources(this@MainActivity, database)
+    }
+    latestSleepImport?.let { result ->
+     if (BuildConfig.DEBUG) Log.d("SleepImport", "Finished trigger=$trigger outcome=${result.outcome} imported=${result.importedCount} skipped=${result.skippedCount} conflicts=${result.conflictCount}")
+    }
+   } catch (cancelled: CancellationException) {
+    throw cancelled
+   } catch (error: Exception) {
+    if (BuildConfig.DEBUG) Log.w("SleepImport", "Foreground read failed (${error.javaClass.simpleName})")
+    latestSleepImport = ImportResult(
+     status = HealthDataSourceStatus.AVAILABLE_CONNECTED,
+     outcome = ImportOutcome.READ_FAILED,
+     message = error.message ?: "读取失败"
+    )
+   } finally {
+    sleepSyncBusy = false
+    sleepSyncJob = null
+    refresh++
+    if (syncAgainAfterCurrent) {
+     syncAgainAfterCurrent = false
+     requestSleepSync("queued")
+    }
+   }
+  }
+ }
  private fun receiveText(intent: Intent): Boolean {
   if(intent.action != Intent.ACTION_SEND || intent.type != "text/plain") return false
   val text=intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty()
@@ -65,6 +116,8 @@ class MainActivity : ComponentActivity() {
   super.onNewIntent(intent)
   setIntent(intent)
   if(intent.hasExtra(EXTRA_DESTINATION_PAGE)) requestedPage = intent.getIntExtra(EXTRA_DESTINATION_PAGE, 0)
+  if(intent.hasExtra(EXTRA_DESTINATION_SECTION)) requestedSettingsSection = intent.getStringExtra(EXTRA_DESTINATION_SECTION)
+  if(intent.hasExtra("target_package")) requestedEmergencyPackage = intent.getStringExtra("target_package")
   val nav = resolveInitialNavigation(
    action = intent.action,
    mimeType = intent.type,
@@ -80,7 +133,7 @@ class MainActivity : ComponentActivity() {
   if(receiveText(intent)) shareVersion++
   refresh++
  }
- override fun onResume() { super.onResume(); refresh++;runCatching { Database(this).use { NightWrapUpScheduler.reschedule(this,it) } } }
+ override fun onResume() { super.onResume(); refresh++;runCatching { Database(this).use { NightWrapUpScheduler.reschedule(this,it) } };requestSleepSync("foreground") }
  override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState)
   val initialNavigation = resolveInitialNavigation(
    action = intent.action,
@@ -91,19 +144,21 @@ class MainActivity : ComponentActivity() {
   )
   window.useDarkSystemBars()
   receiveText(intent)
-  val db = Database(this); val store = Store(this)
+  val db = Database(this); appDatabase = db; val store = Store(this)
   val focusTimer=FocusTimer(db);focusTimer.reconcileBoot()
   initializeAchievementNotices(db)
-  SleepImportManager.syncFromAvailableSources(this, db)
   val launch = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
   val apps = packageManager.queryIntentActivities(launch,0).filter { store.canRestrict(it.activityInfo.packageName) }.distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(packageManager).toString() }
   setContent {
     // Keep navigation alive while this Activity is backgrounded; a fresh Activity follows its launch intent.
     val launchDest = intent.getIntExtra(EXTRA_DESTINATION_PAGE, -1).takeIf { it >= 0 }
-    var page by remember { mutableIntStateOf(launchDest ?: initialNavigation.page) }; var planManagement by remember { mutableStateOf(initialNavigation.openPlanManagement) }; var planSection by remember { mutableStateOf<String?>(if(initialNavigation.openPlanManagement) "import" else null) }; var settingsSection by remember { mutableStateOf<String?>(initialNavigation.openSettingsSection) }; var showSleepRationale by remember { mutableStateOf(initialNavigation.showSleepRationale) }; var editor by remember { mutableStateOf(false) };var showAllRewardHistory by remember { mutableStateOf(false) };var rewardControlsExpanded by remember { mutableStateOf(false) };var selectedRewardRecord by remember { mutableStateOf<String?>(null) };var taskFilter by remember { mutableIntStateOf(0) }
+    var page by remember { mutableIntStateOf(launchDest ?: initialNavigation.page) }; var planManagement by remember { mutableStateOf(initialNavigation.openPlanManagement) }; var planSection by remember { mutableStateOf<String?>(if(initialNavigation.openPlanManagement) "import" else null) }; var settingsSection by remember { mutableStateOf<String?>(intent.getStringExtra(EXTRA_DESTINATION_SECTION) ?: initialNavigation.openSettingsSection) }; var targetEmergencyPackage by remember { mutableStateOf(intent.getStringExtra("target_package")) }; var showSleepRationale by remember { mutableStateOf(initialNavigation.showSleepRationale) }; var editor by remember { mutableStateOf(false) };var showAllRewardHistory by remember { mutableStateOf(false) };var rewardControlsExpanded by remember { mutableStateOf(false) };var selectedRewardRecord by remember { mutableStateOf<String?>(null) };var taskFilter by remember { mutableIntStateOf(0) }
     var targetDay by remember { mutableStateOf("") }; var now by remember { mutableLongStateOf(0L) }; var taskDetailsId by remember { mutableStateOf<String?>(null) }; var editingTaskId by remember { mutableStateOf<String?>(null) };var movingTask by remember { mutableStateOf<Task?>(null) };var deletingTask by remember { mutableStateOf<Task?>(null) };var allAchievements by remember { mutableStateOf(false) }; var newAchievement by remember { mutableStateOf(nextUnseenAchievement(db)) }; var gritAnalyticsTaskId by remember { mutableStateOf<String?>(null) }; var dailyCardDate by remember { mutableStateOf<String?>(null) }; var dailyCardOpenDate by remember { mutableStateOf<String?>(null) }; var showSleepRecordDate by remember { mutableStateOf<String?>(null) }
     var detailMode by remember { mutableStateOf(if (BuildConfig.DEBUG) db.setting(DetailModeKey,"sheet") else "sheet") }; var inlineTaskId by remember { mutableStateOf<String?>(null) }
     fun dismissTaskActions() { movingTask=null; deletingTask=null; inlineTaskId=null }
+   LaunchedEffect(page, settingsSection) {
+       if (page == 5 && settingsSection == "sleep") requestSleepSync("sleep_page")
+   }
    LaunchedEffect(requestedPage) {
        requestedPage?.let {
            page = it
@@ -114,6 +169,10 @@ class MainActivity : ComponentActivity() {
                requestedSettingsSection = null
            } else {
                settingsSection = null
+           }
+           if (requestedEmergencyPackage != null) {
+               targetEmergencyPackage = requestedEmergencyPackage
+               requestedEmergencyPackage = null
            }
            if (requestedSleepRationale) {
                showSleepRationale = true
@@ -207,29 +266,29 @@ class MainActivity : ComponentActivity() {
         item { Header("奖励与额度", "娱乐时间") }
         item { CardBlock {
          val video=db.rewardSnapshot("video");val games=db.rewardSnapshot("game")
-         Text(if(!protected) "应用保护未开启" else if(c.emergency) "今天已紧急解锁" else if(video.remaining>0) "保护已开启 · 额度可用" else if(tasks.any{it.required && !it.done && it.rewardMinutes>0}) "必做任务奖励逐项到账" else if(tasks.any{it.required && it.done}) "娱乐时长已用完" else "暂无可用娱乐时长",color=if(video.remaining>0 && protected && !c.emergency) AppColors.Accent else AppColors.Muted,style=MaterialTheme.typography.labelMedium)
+         val activeEmergency = db.activeEmergencyUnlock()
+         val hasEmergency = activeEmergency != null || c.emergency
+         Text(if(!protected) "应用保护未开启" else if(hasEmergency) "紧急解锁中" else if(video.remaining>0) "保护已开启 · 额度可用" else if(tasks.any{it.required && !it.done && it.rewardMinutes>0}) "必做任务奖励逐项到账" else if(tasks.any{it.required && it.done}) "娱乐时长已用完" else "暂无可用娱乐时长",color=if(video.remaining>0 && protected && !hasEmergency) AppColors.Accent else AppColors.Muted,style=MaterialTheme.typography.labelMedium)
          Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
           Column(verticalArrangement=Arrangement.spacedBy(2.dp)) { Text("${(video.remaining + 59_999L) / 60_000L}",fontSize=38.sp,fontWeight=FontWeight.Light,lineHeight=42.sp,color=AppColors.Reward); Text("剩余分钟",color=AppColors.Muted,style=MaterialTheme.typography.bodySmall) }
           Column(horizontalAlignment=Alignment.End,verticalArrangement=Arrangement.spacedBy(2.dp)) { Text("${games.remaining}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Light); Text("剩余游戏局数",color=AppColors.Muted,style=MaterialTheme.typography.bodySmall) }
          }
          Hairline()
          Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {Text("已获得 ${video.earned/60000} 分钟",style=MaterialTheme.typography.labelMedium,color=AppColors.Muted);Text("已使用 ${video.used/60000} 分钟",style=MaterialTheme.typography.labelMedium,color=AppColors.Muted)}
-         if(video.sleepDeducted>0 || video.expired>0 || video.reversed>0 || db.pendingSleepPenalty()>0) Text("睡眠扣减 ${video.sleepDeducted/60000} · 已过期 ${video.expired/60000} · 冲回 ${video.reversed/60000} · 待抵扣 ${db.pendingSleepPenalty()/60000} 分钟",style=MaterialTheme.typography.labelSmall,color=AppColors.Muted)
-         val nightPendingVideo=db.pendingNightPenalty("video");val nightPendingGames=db.pendingNightPenalty("game")
-         if(video.nightDeducted>0 || games.nightDeducted>0 || nightPendingVideo>0 || nightPendingGames>0) Text("夜间抵扣 · 娱乐 ${video.nightDeducted/60000} 分钟、游戏 ${games.nightDeducted} 局 · 待抵扣 ${nightPendingVideo/60000} 分钟、$nightPendingGames 局",style=MaterialTheme.typography.labelSmall,color=AppColors.Muted)
+         val pendingSleep = db.pendingSleepPenalty("video", date = today)
+         if(video.sleepDeducted>0 || video.expired>0 || video.reversed>0 || pendingSleep>0) {
+          val items = mutableListOf<String>()
+          if (video.sleepDeducted > 0) items.add("睡眠扣减 ${video.sleepDeducted/60000}")
+          if (video.expired > 0) items.add("已过期 ${video.expired/60000}")
+          if (video.reversed > 0) items.add("冲回 ${video.reversed/60000}")
+          if (pendingSleep > 0) items.add("待抵扣 ${pendingSleep/60000} 分钟")
+          Text(items.joinToString(" · "), style=MaterialTheme.typography.labelSmall, color=AppColors.Muted)
+         }
          Text("游戏已获 ${games.earned} 局 · 已用 ${games.used} 局 · 每日 00:00 更新，额度 ${db.setting("boundary","4").padStart(2,'0')}:00 结算",style=MaterialTheme.typography.labelSmall,color=AppColors.Quiet)
          if(games.remaining > 0) TextButton(onClick={db.consume("game",1); refresh++}) { Text("手动记录已使用一局") }
         } }
         items(tasks.filter{it.typeKnown && !it.required && it.done && !it.claimed},key={it.id}) { task -> CardBlock { Text("${task.title} · 领取一项奖励"); Row { if(task.rewardMinutes>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"video");refresh++}) {Text("${task.rewardMinutes} 分钟娱乐时长")}; if(task.rewardGames>0) TextButton(enabled=db.eligible(),onClick={db.claim(task,"game");refresh++}) {Text("${task.rewardGames} 局游戏") } }; db.rewardUnavailableReason(task.date)?.let { Text(it,color=AppColors.Muted) } } }
         item { CardBlock { Text("最近记录",style=MaterialTheme.typography.titleMedium); val records=db.rewardHistory(); if(records.isEmpty()) Text("暂无发放与使用记录",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted); records.take(3).forEach { record -> TextButton(onClick={selectedRewardRecord=record},contentPadding=PaddingValues(vertical=4.dp,horizontal=0.dp)) {Text(record,style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)} }; if(records.size>3) TextButton(onClick={showAllRewardHistory=true}) { Text("查看全部 ${records.size} 条记录") } } }
-        item { TextButton(onClick={rewardControlsExpanded=!rewardControlsExpanded},modifier=Modifier.animateContentSize()) {Text(if(rewardControlsExpanded) "收起其他操作" else "应用保护与其他操作") } }
-        if(rewardControlsExpanded) item { CardBlock {
-         if(!c.emergency) EmergencyUnlock(db){refresh++} else TextButton(onClick={db.resumeProtection();refresh++}){Text("恢复应用保护")}
-         TextButton(onClick={db.startLearning();refresh++},enabled=!db.learningActive()) {Text(if(db.learningActive()) "B站学习窗口进行中" else "开启 B站15分钟学习窗口")}
-         Text("学习窗口临时放行 · 不扣娱乐时长",style=MaterialTheme.typography.bodySmall,color=AppColors.Muted)
-         TextButton(onClick={page=5;settingsSection="protection"}){Text("受限应用与权限")}
-         TextButton(onClick={page=5;settingsSection="night"}){Text("夜间收尾设置")}
-        } }
        }
        2 -> {
         item { GrowthHero(db,refresh){allAchievements=true;page=2} }
@@ -237,12 +296,16 @@ class MainActivity : ComponentActivity() {
        }
        4 -> { item { FocusScreen(db,focusTimer,tasks,onTasks={page=0},onChanged={refresh++}) } }
         5 -> {
-          item { SettingsPageHeader(if(settingsSection==null) "设置" else when(settingsSection){"protection"->"应用保护";"reward"->"奖励规则";"sleep"->"睡眠管理";"night"->"夜间收尾";"backup"->"数据备份";else->"关于向前"}, if(settingsSection==null) "今天" else "设置", onBack={if(settingsSection==null)page=0 else settingsSection=null}) }
+          item { SettingsPageHeader(if(settingsSection==null) "设置" else when(settingsSection){"protection"->"应用保护";"emergency_unlock"->"紧急解锁";"reward"->"奖励规则";"sleep"->"睡眠管理";"night"->"夜间收尾";"backup"->"数据备份";else->"关于向前"}, if(settingsSection==null) "今天" else "设置", onBack={if(settingsSection==null)page=0 else settingsSection=null}) }
          if(settingsSection==null) {
           item {
            CardBlock {
             Text("规则与保护", style = MaterialTheme.typography.labelMedium, color = AppColors.Muted)
             SettingsItemRow("应用保护", if(protected) "已连接 · ${store.selected.size} 个应用" else "未开启") { settingsSection = "protection" }
+            Hairline()
+            val emergencyStats = db.emergencyUnlockStats()
+            val activeEmergency = db.activeEmergencyUnlock()
+            SettingsItemRow("紧急解锁", if(activeEmergency != null) "进行中" else "24小时 ${emergencyStats.used24h}/1 · 168小时 ${emergencyStats.used168h}/3") { settingsSection = "emergency_unlock" }
             Hairline()
             SettingsItemRow("奖励规则", "${db.setting("boundary","4").padStart(2,'0')}:00") { settingsSection = "reward" }
             Hairline()
@@ -264,6 +327,18 @@ class MainActivity : ComponentActivity() {
          } else when(settingsSection) {
           "protection" -> {
            item { CardBlock { Text(if(protected) "应用保护已开启" else "应用保护未开启",style=MaterialTheme.typography.titleMedium,color=if(protected) AppColors.Accent else AppColors.Text);Text("已选择 ${store.selected.size} 个受限应用",color=AppColors.Muted);SecondaryAction("打开无障碍设置",{startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))}) } }
+           item {
+            CardBlock {
+             Text("学习窗口（15分钟）", style = MaterialTheme.typography.titleSmall)
+             Text("临时放行 B站，不扣减娱乐时长", style = MaterialTheme.typography.bodySmall, color = AppColors.Muted)
+             if (db.learningActive()) {
+              Text("学习窗口进行中", color = AppColors.Accent, style = MaterialTheme.typography.labelMedium)
+              TextButton(onClick = { db.stopLearning(); refresh++ }) { Text("结束学习窗口") }
+             } else {
+              TextButton(onClick = { db.startLearning(); refresh++ }) { Text("开启 B站 15 分钟学习窗口") }
+             }
+            }
+           }
            item { Text("受限应用",style=MaterialTheme.typography.titleMedium) }
            items(apps, key = { it.activityInfo.packageName }) { app ->
             val pkg = app.activityInfo.packageName
@@ -284,8 +359,29 @@ class MainActivity : ComponentActivity() {
             }
            }
           }
+          "emergency_unlock" -> item {
+           EmergencyUnlockScreen(
+            db = db,
+            store = store,
+            initialPackage = targetEmergencyPackage,
+            onBack = { settingsSection = null },
+            onChanged = { refresh++ }
+           )
+          }
           "reward" -> item { DaySettings(db){refresh++} }
-          "sleep" -> item { SleepPage(db,refresh,{settingsSection=null},showSleepRationale,{showSleepRationale=false}){refresh++} }
+           "sleep" -> item {
+            SleepPage(
+             db = db,
+             refreshKey = refresh,
+             onBack = { settingsSection = null },
+             initialShowRationale = showSleepRationale,
+             onDismissRationale = { showSleepRationale = false },
+             latestImportResult = latestSleepImport,
+             isSyncing = sleepSyncBusy,
+             onRequestSync = { forceAfterCurrent -> requestSleepSync(if (forceAfterCurrent) "permission" else "manual", forceAfterCurrent) },
+             onChanged = { refresh++ }
+            )
+           }
           "night" -> item { NightWrapUpCard(db, refresh) { refresh++ } }
           "backup" -> item { BackupView(db,{refresh++},{focusTimer.resetAfterRestore()}) }
           else -> item { CardBlock { Text("向前",style=MaterialTheme.typography.titleLarge);Text("版本 ${BuildConfig.VERSION_NAME}",color=AppColors.Muted); if(BuildConfig.DEBUG && runCatching { Class.forName("com.focus.prototype.DesignLabActivity") }.isSuccess) TextButton(onClick={startActivity(Intent().setClassName(this@MainActivity, "com.focus.prototype.DesignLabActivity"))}) { Text("设计实验室（Debug）") } } }

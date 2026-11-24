@@ -161,12 +161,15 @@ class BlockOverlayActivity : ComponentActivity() {
             isFocusable = true
             setPadding(dp(18), dp(15), dp(18), dp(15))
             setOnClickListener {
-                db.emergency()
                 FocusService.overlayDismissed()
-                finish()
-                blockedPackage?.let { packageManager.getLaunchIntentForPackage(it) }?.let {
-                    startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                val intent = Intent(this@BlockOverlayActivity, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    putExtra(MainActivity.EXTRA_DESTINATION_PAGE, 5)
+                    putExtra(MainActivity.EXTRA_DESTINATION_SECTION, "emergency_unlock")
+                    putExtra("target_package", blockedPackage)
                 }
+                startActivity(intent)
+                finish()
             }
         }
         panel.addView(secondaryBtn, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
