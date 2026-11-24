@@ -324,7 +324,10 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    db.rawQuery("SELECT key,value FROM settings WHERE key GLOB 'sleep_pending_*' AND key NOT GLOB 'sleep_pending_video_*' AND key NOT GLOB 'sleep_pending_game_*' AND CAST(value AS INTEGER)>0",null).use { c ->
     while(c.moveToNext()) {
      val key=c.getString(0);val parts=key.removePrefix("sleep_pending_").split('_')
-     if(parts.size>=2)pending.add(Triple(parts.dropLast(1).joinToString("_"),parts.last(),c.getString(1).toLong()))
+     if(parts.size>=2) {
+      val effectiveDate=parts.dropLast(1).joinToString("_")
+      if(effectiveDate==date)pending.add(Triple(effectiveDate,parts.last(),c.getString(1).toLong()))
+     }
     }
    }
    db.rawQuery("SELECT key,value FROM settings WHERE key GLOB 'sleep_pending_video_*' AND CAST(value AS INTEGER)>0",null).use { c ->
@@ -333,7 +336,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
      if(parts.size>=2) {
       val effectiveDate = parts[0]
       val cycleDate = parts[1]
-      if(date >= effectiveDate) {
+      if(date == effectiveDate) {
        pending.add(Triple(effectiveDate, "video:$cycleDate", c.getString(1).toLong()))
       }
      }
@@ -357,7 +360,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
      if(parts.size>=2) {
       val effectiveDate = parts[0]
       val cycleDate = parts[1]
-      if(date >= effectiveDate) {
+      if(date == effectiveDate) {
        pending.add(Triple(effectiveDate, "game:$cycleDate", c.getString(1).toLong()))
       }
      }
@@ -769,8 +772,15 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
  }
 
  fun pendingSleepPenalty(kind: String = "video", date: String? = null, cycleDate: String? = null): Long {
+  val effectiveDateFilter = date ?: day()
   if(kind == "video") {
-   val legacy = if (cycleDate != null) 0L else readableDatabase.rawQuery("SELECT COALESCE(SUM(CAST(value AS INTEGER)),0) FROM settings WHERE key GLOB 'sleep_pending_*' AND key NOT GLOB 'sleep_pending_game_*' AND key NOT GLOB 'sleep_pending_video_*'",null).use{it.moveToFirst();it.getLong(0)}
+   var legacy = 0L
+   if (cycleDate == null) readableDatabase.rawQuery("SELECT key, value FROM settings WHERE key GLOB 'sleep_pending_*' AND key NOT GLOB 'sleep_pending_game_*' AND key NOT GLOB 'sleep_pending_video_*' AND CAST(value AS INTEGER)>0",null).use { c ->
+    while(c.moveToNext()) {
+     val parts=c.getString(0).removePrefix("sleep_pending_").split('_')
+     if(parts.size>=2 && parts.dropLast(1).joinToString("_")==effectiveDateFilter) legacy+=c.getString(1).toLong()
+    }
+   }
    var v1 = 0L
    readableDatabase.rawQuery("SELECT key, value FROM settings WHERE key GLOB 'sleep_pending_video_*' AND CAST(value AS INTEGER)>0", null).use { c ->
     while (c.moveToNext()) {
@@ -780,7 +790,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
       val effectiveDate = parts[0]
       val cDate = parts[1]
       if (cycleDate != null && cDate != cycleDate) continue
-      if (date != null && date != effectiveDate) continue
+      if (effectiveDateFilter != effectiveDate) continue
       v1 += c.getString(1).toLong()
      }
     }
@@ -796,7 +806,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
       val effectiveDate = parts[0]
       val cDate = parts[1]
       if (cycleDate != null && cDate != cycleDate) continue
-      if (date != null && date != effectiveDate) continue
+      if (effectiveDateFilter != effectiveDate) continue
       v1 += c.getString(1).toLong()
      }
     }
@@ -1148,7 +1158,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    }
    val bedPenalty=reconcile("bedtime",old?.bedtimePenalty?:0,desiredBed)
    val wakePenalty=reconcile("wake",old?.wakePenalty?:0,desiredWake)
-   val pending=pendingSleepPenalty()
+   val pending=pendingSleepPenalty("video", date=date)
    val durationMinutes = calculateSleepDurationMinutes(date, bedtime, wake)
    val status = if (excepted) SleepStatus.PAUSED else if (bedPenalty == 0L && wakePenalty == 0L && durationMinutes >= 420L) SleepStatus.PASS else SleepStatus.FAIL
    val record=org.json.JSONObject().put("bedtime",bedtime).put("wake",wake).put("bed_penalty",bedPenalty).put("wake_penalty",wakePenalty).put("excepted",excepted).put("reason",reason.trim()).put("source",source).put("duration_minutes",durationMinutes).put("status",status.name)
