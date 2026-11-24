@@ -3,3 +3,21 @@
 /app/build/
 /local.properties
 .idea/
+# Local QA, app builds, and device data that must stay outside Git
+/.kotlin/
+/artifacts/
+/dist/
+*.apk
+*.aab
+*.mp4
+*.mov
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.forwardbackup
+*.jks
+*.keystore
+*.pem
+.env

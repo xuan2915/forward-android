@@ -29,7 +29,7 @@ internal data class BackupPreview(
 object Backup {
     private const val FORMAT = "xiangqian-local-backup"
     private const val CURRENT_VERSION = 5
-    private val tables = listOf("contracts", "tasks", "task_moves", "ledger", "reviews", "audit", "settings", "templates", "attachments", "night_violations", "emergency_unlocks")
+    private val tables = listOf("contracts", "tasks", "task_moves", "ledger", "reviews", "audit", "settings", "templates", "attachments", "night_violations", "emergency_unlocks", "xp_ledger", "achievement_unlocks", "achievement_reconcile_logs")
     private val requiredTables = listOf("contracts", "tasks", "ledger", "reviews", "audit", "settings")
 
     private data class Asset(val key: String, val name: String, val bytes: ByteArray)
@@ -224,6 +224,8 @@ object Backup {
                 }
                 if (!parsed.data.has("templates")) db.seedTemplates(sql)
                 if (!parsed.data.has("attachments")) db.seedAttachments(sql)
+                if (!parsed.data.has("xp_ledger")) XpLedger.seedFromExistingTasks(sql)
+                if (!parsed.data.has("achievement_unlocks")) AchievementEngine.initSchema(sql)
                 sql.setTransactionSuccessful()
             } finally {
                 sql.endTransaction()

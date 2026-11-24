@@ -148,9 +148,11 @@ private data class GrowthSnapshot(val planDays: Int, val achievedDays: Int, val 
 @Composable fun GrowthHero(db:Database, refreshKey:Int=0, onAllAchievements:()->Unit={}) {
  val motion=LocalGrowthMotion.current
  val xp=motion.xp.toInt().coerceAtLeast(0)
- val level=xp/500+1
- val levelProgress=(motion.xp%500)/500f
- val rank=listOf("启程","萌芽","探索","积累","进阶","坚韧","精进","卓越")[(level-1).coerceAtMost(7)]
+ val curveProgress=LevelCurveRegistry.activeCurve.progress(xp.toLong())
+ val level=curveProgress.level
+ val levelProgress=curveProgress.progressRatio
+ val rank=curveProgress.rank
+ val xpToNext=curveProgress.xpToNextLevel
  val today=LocalDate.parse(db.day())
  val snapshot=remember(db,refreshKey,today) {
   val stats=db.growthPeriodStats(today.toString())
@@ -172,7 +174,7 @@ private data class GrowthSnapshot(val planDays: Int, val achievedDays: Int, val 
   }
   Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
    Text("${(levelProgressAnimated*100).toInt()}% 本级进度",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-   Text("还差 ${ceil((500-levelProgressAnimated*500).coerceAtLeast(0f)).toInt()} XP 升级",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+   Text("还差 $xpToNext XP 升级",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
   }
   GrowthFeedback()
   GritGrowthStats(snapshot,onAllAchievements)

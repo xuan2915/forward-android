@@ -69,11 +69,15 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   upgradeHistory(db)
   upgradeLedger(db)
   upgradeEmergencyUnlocks(db)
+  upgradeXpLedger(db)
+  upgradeAchievements(db)
  }
  override fun onOpen(db: SQLiteDatabase) {
   super.onOpen(db)
   upgradeLedger(db)
   upgradeEmergencyUnlocks(db)
+  upgradeXpLedger(db)
+  upgradeAchievements(db)
  }
  override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
   if(oldVersion<2) upgradeTemplates(db)
@@ -94,6 +98,9 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   }
   if(oldVersion<8) upgradeHistory(db)
   upgradeLedger(db)
+  upgradeEmergencyUnlocks(db)
+  upgradeXpLedger(db)
+  upgradeAchievements(db)
  }
  private fun upgradeLedger(db: SQLiteDatabase) {
   val existing = mutableSetOf<String>()
@@ -229,7 +236,14 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
  }
  fun confirm(day: String, rest: Boolean, minutes: Int, games: Int) {
   val c = contract(day); require(!c.confirmed); require(!rest || tasks(day).none { it.required })
-  writableDatabase.update("contracts",cv("confirmed" to true,"rest" to rest,"base_minutes" to minutes,"base_games" to games),"day=?", arrayOf(day))
+  val db = writableDatabase
+  db.beginTransaction()
+  try {
+   val updated = db.update("contracts",cv("confirmed" to true,"rest" to rest,"base_minutes" to minutes,"base_games" to games),"day=? AND confirmed=0", arrayOf(day))
+   check(updated == 1) { "计划状态已变化，请刷新后重试" }
+   db.insertWithOnConflict("settings", null, cv("key" to "plan_confirmed_at_$day", "value" to wallNow().toString()), SQLiteDatabase.CONFLICT_REPLACE)
+   db.setTransactionSuccessful()
+  } finally { db.endTransaction() }
  }
  fun goalState(date:String):DailyGoalState { val c=contract(date);return dailyGoalState(tasks(date,includeMoved=true),c.rest,date,day()) }
  // Keep the historical ledger keys so upgrades preserve balances and debits.
@@ -514,6 +528,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    }
    db.setTransactionSuccessful()
   } finally { db.endTransaction() }
+  AchievementEngine(this).evaluateAll()
  }
  fun claim(task: Task, kind: String) { val db = writableDatabase; db.beginTransaction(); try { val fresh = tasks(task.date).first { it.id == task.id }; if (eligible(task.date) && fresh.typeKnown && !fresh.required && fresh.done && !fresh.claimed && task.date == day()) { val amount = if(kind == "video") fresh.rewardMinutes * 60000L else fresh.rewardGames.toLong(); require(amount > 0); grantReward(db,task.date,task.id,kind,amount); db.update("tasks",cv("claimed" to true),"id=?",arrayOf(task.id)) }; db.setTransactionSuccessful() } finally { db.endTransaction() } }
  fun start(task: Task) { val fresh=tasks(task.date).first{it.id==task.id};if(fresh.done || fresh.runningSince != 0L) return; runningTasks().forEach{pause(it)};writableDatabase.update("tasks",cv("running_since" to SystemClock.elapsedRealtime(),"boot_time" to (System.currentTimeMillis()-SystemClock.elapsedRealtime())),"id=?",arrayOf(task.id)) }
@@ -535,6 +550,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    require(fresh.elapsed >= fresh.minutes * 60000L && (fresh.mode == "行动型" || fresh.evidence.isNotBlank()))
    val completedAt=wallNow()
    db.update("tasks",cv("done" to true,"completed_at" to completedAt),"id=?",arrayOf(task.id))
+   XpLedger.award(db, XpLedger.SOURCE_TASK, fresh.id, 100, fresh.date, completedAt, "task_${fresh.id}", 1, "title:${fresh.title}")
    if(fresh.required) {
     listOf("video" to fresh.rewardMinutes.toLong()*60000L,"game" to fresh.rewardGames.toLong()).forEach { (kind,amount) ->
      val key="task_reward_${fresh.id}_$kind"
@@ -543,6 +559,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    }
    db.setTransactionSuccessful()
   } finally { db.endTransaction() }
+  AchievementEngine(this).evaluateAll()
  }
  fun removeDraft(task: Task) { require(!contract(task.date).confirmed && !task.done); deleteTask(task,"") }
  fun deleteTask(task:Task,reason:String) {
@@ -602,6 +619,7 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
    else db.update("tasks",cv("title" to title,"required" to required,"minutes" to minutes,"mode" to mode,"checklist" to checklist,"reward_minutes" to video,"reward_games" to games,"recurrence" to recurrence),"id=?",arrayOf(task.id))
    db.setTransactionSuccessful()
   } finally { db.endTransaction() }
+  AchievementEngine(this).evaluateAll()
  }
  fun editDraft(task: Task, title:String, minutes:Int, checklist:String) { require(!contract(task.date).confirmed && !task.done && title.isNotBlank()); writableDatabase.update("tasks",cv("title" to title.trim(),"minutes" to minutes,"checklist" to checklist),"id=?",arrayOf(task.id)) }
  fun recurrence(task:Task):String = readableDatabase.rawQuery("SELECT recurrence FROM tasks WHERE id=?",arrayOf(task.id)).use {if(it.moveToFirst())it.getString(0) else "once"}
@@ -658,10 +676,12 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
     // reversed above), but a fresh completion can be claimed again.
     db.update("tasks",cv("done" to false,"claimed" to false,"completed_at" to 0L),"id=?",arrayOf(task.id))
     for(kind in listOf("video","game"))setSetting("task_reward_${fresh.id}_$kind","false")
+    XpLedger.reverse(db, XpLedger.SOURCE_TASK, fresh.id, "task_revoked")
     audit(task.date,"撤销任务：${fresh.title}；已领取额度按剩余余额冲正")
    }
    db.setTransactionSuccessful()
   } finally { db.endTransaction() }
+  AchievementEngine(this).reconcileOnTaskRevoke(task)
  }
  fun sleepWindowMinutes(bed: String, wake: String): Long {
   val bedTime = java.time.LocalTime.parse(bed)
@@ -1217,7 +1237,42 @@ class Database(context: Context, name:String = "journey.db", private val wallNow
   runningTasks().filter{it.origin!="sleep_system"}.forEach{task->focus+=(elapsed(task)-task.elapsed).coerceAtLeast(0L)}
   return GrowthPeriodStats(plan30,achieved30,plan7,achieved7,focus)
  }
- fun xp(): Int = readableDatabase.rawQuery("SELECT COUNT(*) FROM tasks WHERE done=1 AND origin!='sleep_system' AND id NOT IN (SELECT source_id FROM task_moves)", null).use { it.moveToFirst(); it.getInt(0)*100 }
+ fun xp(): Int {
+  upgradeXpLedger(writableDatabase)
+  return XpLedger.totalXp(readableDatabase)
+ }
+ fun awardXp(sourceType: String, sourceId: String, amount: Int, date: String = day(), idempotencyKey: String = "", version: Int = 1, metadata: String = ""): XpTransaction =
+  XpLedger.award(writableDatabase, sourceType, sourceId, amount, date, wallNow(), idempotencyKey, version, metadata)
+
+ fun reverseXp(sourceType: String, sourceId: String, reason: String = ""): Boolean =
+  XpLedger.reverse(writableDatabase, sourceType, sourceId, reason)
+
+ fun redoXp(sourceType: String, sourceId: String): Boolean {
+  val tx = XpLedger.findBySource(readableDatabase, sourceType, sourceId) ?: return false
+  if (tx.status == XpStatus.ACTIVE) return true
+  XpLedger.award(writableDatabase, sourceType, sourceId, tx.amount, tx.day, wallNow(), tx.idempotencyKey, tx.version, tx.metadata)
+  return true
+ }
+
+ fun queryXpBySource(sourceType: String, sourceId: String): XpTransaction? =
+  XpLedger.findBySource(readableDatabase, sourceType, sourceId)
+
+ fun queryXpHistory(limit: Int = 100): List<XpTransaction> =
+  XpLedger.queryHistory(readableDatabase, limit)
+
+ private fun upgradeXpLedger(db: SQLiteDatabase) {
+  XpLedger.initSchema(db)
+  val count = db.rawQuery("SELECT COUNT(*) FROM xp_ledger", null).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+  if (count == 0) {
+   XpLedger.seedFromExistingTasks(db)
+  }
+ }
+
+ private fun upgradeAchievements(db: SQLiteDatabase) {
+  AchievementEngine.initSchema(db)
+ }
+
+ fun achievementEngine(): AchievementEngine = AchievementEngine(this)
  fun streak(): Int {
   val states=history().toMap();var d=LocalDate.parse(day());var count=0
   if(states[d.toString()]!="完成")d=d.minusDays(1)
